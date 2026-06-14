@@ -2,7 +2,7 @@
 
 > **This project is a work in progress.** It is being actively developed as a final-year dissertation project at the University of Portsmouth. Expect breaking changes, incomplete features, and missing documentation.
 
----
+
 
 A used-car buying assistant for the UK market. Augur pulls official DVLA MOT history and tax data, overlays crowdsourced owner reliability reports, and uses an AI layer to generate a plain-English verdict on any car — covering reliability, value, and suitability — answered from real data, not guesswork.
 
