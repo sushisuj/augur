@@ -29,7 +29,7 @@ Built for buyers who know what they want but don't know whether a specific car i
 
 ## Dissertation Context
 
-Augur is the engineering project for MEng Computer Science (final year) at the University of Portsmouth. Development started summer 2025, with a working prototype target of October 2025.
+Augur is the engineering project for MEng Computer Science (third year) at the University of Portsmouth. Development started summer 2025, with a working prototype target of October 2025.
 
 ---
 
