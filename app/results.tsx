@@ -26,6 +26,16 @@ type VehicleResult = {
   fault_count: number;
 };
 
+function cleanText(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")  // strip **bold**
+    .replace(/\*(.*?)\*/g, "$1")      // strip *italic*
+    .replace(/['']/g, "'")            // smart single quotes
+    .replace(/[""]/g, '"')            // smart double quotes
+    .replace(/–|—/g, "-")             // em/en dash
+    .replace(/�/g, "'");         // replacement character (mojibake)
+}
+
 const SEVERITY_COLOR: Record<string, string> = {
   High: "#e53e3e",
   Medium: "#dd6b20",
@@ -97,7 +107,7 @@ export default function ResultsScreen() {
       {/* AI Summary */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Buyer Summary</Text>
-        <Text style={styles.summary}>{data.summary}</Text>
+        <Text style={styles.summary}>{cleanText(data.summary)}</Text>
       </View>
 
       {/* Fault list */}
@@ -123,7 +133,7 @@ export default function ResultsScreen() {
                   </View>
                 </View>
                 <Text style={styles.faultDescription}>
-                  {fault.fault_description}
+                  {cleanText(fault.fault_description)}
                 </Text>
               </View>
             );
