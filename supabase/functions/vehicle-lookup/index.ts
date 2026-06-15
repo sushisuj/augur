@@ -8,7 +8,15 @@ const corsHeaders = {
 
 // ── MOT History API ───────────────────────────────────────────────────────────
 
+// Cache the OAuth token for the lifetime of the Deno isolate (up to ~1 hour).
+// Each cold start gets a fresh token; warm invocations skip the round-trip.
+let _motTokenCache: { value: string; expiresAt: number } | null = null;
+
 async function getMOTToken(): Promise<string> {
+  if (_motTokenCache && Date.now() < _motTokenCache.expiresAt) {
+    return _motTokenCache.value;
+  }
+
   const params = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: Deno.env.get("MOT_CLIENT_ID")!,
@@ -28,7 +36,9 @@ async function getMOTToken(): Promise<string> {
   }
 
   const data = await res.json();
-  return data.access_token;
+  // Tokens are typically valid 1 hour; cache for 55 min to be safe
+  _motTokenCache = { value: data.access_token, expiresAt: Date.now() + 55 * 60 * 1000 };
+  return _motTokenCache.value;
 }
 
 async function getVehicleByReg(reg: string, token: string): Promise<any | null> {
@@ -276,7 +286,10 @@ Write a concise 2-3 sentence buyer summary in plain English. If odometer fraud w
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
+            }),
           }
         );
         geminiData = await geminiRes.json();
