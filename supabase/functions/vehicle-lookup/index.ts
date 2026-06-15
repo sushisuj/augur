@@ -1,11 +1,13 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { computeScore } from "./scoring.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Get OAuth2 token from MOT History API
+// ── MOT History API ───────────────────────────────────────────────────────────
+
 async function getMOTToken(): Promise<string> {
   const params = new URLSearchParams({
     grant_type: "client_credentials",
@@ -29,7 +31,6 @@ async function getMOTToken(): Promise<string> {
   return data.access_token;
 }
 
-// Look up vehicle by registration via MOT History API
 async function getVehicleByReg(reg: string, token: string): Promise<any | null> {
   const res = await fetch(
     `https://history.mot.api.gov.uk/v1/trade/vehicles/registration/${reg}`,
@@ -51,22 +52,118 @@ async function getVehicleByReg(reg: string, token: string): Promise<any | null> 
   return res.json();
 }
 
-// Normalise make name to match our DB
+// ── Normalisation ─────────────────────────────────────────────────────────────
+
 function normaliseMake(raw: string): string {
   const lower = raw.toLowerCase().trim();
   if (lower.includes("mercedes")) return "Mercedes-Benz";
   if (lower === "vw" || lower.includes("volkswagen")) return "Volkswagen";
   if (lower.includes("vauxhall")) return "Vauxhall";
   if (lower.includes("land rover")) return "Land Rover";
-  // Title case
   return raw.trim().split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }
 
-// Extract base model (first 2 words) for broader DB matching
+// Words that are trim/variant descriptors, not model names
+const TRIM_WORDS = new Set([
+  "edition", "sport", "se", "limited", "premium", "plus", "pro",
+  "elite", "executive", "titanium", "zetec", "ghia", "lx", "ex",
+  "dx", "active", "design", "line", "cross", "style", "motion",
+]);
+
+function normaliseModelWord(w: string): string {
+  // Alphanumeric model codes: XC60, A3, GLC, RS4, CX5, 3008 → uppercase
+  if (/^[A-Za-z]{1,4}\d/.test(w) || /^\d+[A-Za-z]*$/.test(w)) return w.toUpperCase();
+  // Short all-cap words likely to be acronyms: GTI, AMG, TDI, TSI, TT
+  if (w.length <= 4 && w === w.toUpperCase() && /^[A-Z]+$/.test(w)) return w;
+  // Title case everything else
+  return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+}
+
 function extractBaseModel(raw: string): string {
   const words = raw.trim().split(/\s+/);
-  return words.slice(0, 2).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  // Strip trailing trim-level words, keep up to 2 meaningful words
+  const meaningful = words.filter((w) => !TRIM_WORDS.has(w.toLowerCase()));
+  return meaningful.slice(0, 2).map(normaliseModelWord).join(" ");
 }
+
+// ── MOT history processing ────────────────────────────────────────────────────
+
+/**
+ * Returns a summary of each MOT test: date, result, mileage, failure/advisory counts.
+ */
+function extractMOTHistory(motTests: any[]): any[] {
+  if (!motTests || motTests.length === 0) return [];
+
+  return motTests.map((test) => ({
+    date: test.completedDate?.substring(0, 10) ?? "Unknown",
+    result: test.testResult ?? "UNKNOWN",
+    mileage: test.odometerValue ? parseInt(test.odometerValue) : null,
+    mileage_unit: test.odometerUnit ?? "MI",
+    failures: (test.rfrAndComments ?? []).filter((r: any) => r.type === "FAIL").length,
+    advisories: (test.rfrAndComments ?? []).filter((r: any) => r.type === "ADVISORY").length,
+  }));
+}
+
+/**
+ * Extracts unique failures and advisories from this specific vehicle's MOT tests.
+ * Deduplicates by description, keeping the most recent occurrence.
+ */
+function extractVehicleIssues(motTests: any[]): any[] {
+  if (!motTests || motTests.length === 0) return [];
+
+  const seen = new Map<string, any>();
+
+  for (const test of motTests) {
+    const date = test.completedDate?.substring(0, 10) ?? "Unknown";
+
+    for (const rfr of (test.rfrAndComments ?? [])) {
+      const text = (rfr.text ?? "").trim();
+      if (!text) continue;
+
+      const type: string = rfr.type ?? "";
+      if (type !== "FAIL" && type !== "ADVISORY") continue;
+
+      const key = text.toLowerCase();
+
+      // Keep most recent occurrence (motTests is newest-first)
+      if (!seen.has(key)) {
+        seen.set(key, {
+          fault_description: text,
+          fault_category: type === "FAIL" ? "MOT Failure" : "Advisory",
+          severity: rfr.dangerous ? "High" : type === "FAIL" ? "Medium" : "Low",
+          source: `This vehicle (MOT ${date})`,
+          provenance: "vehicle",
+        });
+      }
+    }
+  }
+
+  // Sort: failures before advisories, dangerous first
+  const SRANK: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+  return Array.from(seen.values()).sort(
+    (a, b) => (SRANK[b.severity] ?? 0) - (SRANK[a.severity] ?? 0)
+  );
+}
+
+
+// ── Fault deduplication ───────────────────────────────────────────────────────
+
+function dedupFaults(faults: any[]): any[] {
+  const SEVERITY_RANK: Record<string, number> = { High: 3, Medium: 2, Low: 1 };
+  const seen = new Map<string, any>();
+  for (const fault of faults) {
+    const key = fault.fault_description.toLowerCase().trim();
+    const existing = seen.get(key);
+    if (!existing || (SEVERITY_RANK[fault.severity] ?? 0) > (SEVERITY_RANK[existing.severity] ?? 0)) {
+      seen.set(key, fault);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+// scoring logic is in scoring.ts
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 
 export default {
   fetch: async (req: Request) => {
@@ -86,8 +183,11 @@ export default {
       Deno.env.get("SUPABASE_ANON_KEY")!
     );
 
-    // Look up real vehicle via MOT History API
+    // 1. Look up vehicle via MOT History API
     let vehicle: { make: string; model: string; year: number; reg: string };
+    let motHistory: any[] = [];
+    let vehicleIssues: any[] = [];
+    let motTests: any[] = [];
 
     try {
       const token = await getMOTToken();
@@ -104,12 +204,16 @@ export default {
         : new Date().getFullYear();
 
       vehicle = { make, model, year, reg };
+
+      motTests = motData.motTests ?? [];
+      motHistory = extractMOTHistory(motTests);
+      vehicleIssues = extractVehicleIssues(motTests);
     } catch (err: any) {
       return Response.json({ error: `Vehicle lookup failed: ${err.message}` }, { status: 500, headers: corsHeaders });
     }
 
-    // Query faults table
-    const { data: faults, error } = await supabase
+    // 2. Query model-level faults from our DB
+    const { data: rawFaults, error } = await supabase
       .from("faults")
       .select("fault_description, fault_category, severity, source, year_from, year_to")
       .ilike("make", vehicle.make)
@@ -122,19 +226,46 @@ export default {
       return Response.json({ error: error.message }, { status: 500, headers: corsHeaders });
     }
 
+    const modelFaults = dedupFaults(rawFaults ?? []).map((f) => ({
+      ...f,
+      provenance: (f.source ?? "").toLowerCase().includes("recall") ? "recall" : "model",
+    }));
+
+    // 3. Compute Augur Score using scoring.ts
+    const rawTests = motTests ?? [];
+    const scoring = computeScore(rawTests, modelFaults);
+    const { score, verdict, flags, breakdown } = scoring;
+
+    // 4. Single Gemini call: fault clustering + buyer summary
     let summary = "No known faults found for this vehicle.";
+    const hasAnyFaults = vehicleIssues.length > 0 || modelFaults.length > 0;
 
-    if (faults && faults.length > 0) {
-      const faultList = faults
-        .map((f) => `- ${f.fault_description} (${f.fault_category}, severity: ${f.severity})`)
-        .join("\n");
+    if (hasAnyFaults || flags.recurringFailures.length > 0 || flags.persistentAdvisories.length > 0 || flags.clockingDetected) {
+      const clockingNote = flags.clockingDetected
+        ? `\nCRITICAL: Odometer fraud detected. The mileage on this vehicle's MOT records decreased between tests, which is physically impossible. The odometer has almost certainly been tampered with (clocked). The true mileage is unknown. This is the primary reason for the 0/100 score.\n`
+        : "";
 
-      const prompt = `You are a used car buying assistant. A buyer is looking at a ${vehicle.year} ${vehicle.make} ${vehicle.model} (reg: ${vehicle.reg}).
+      const recurringNote = flags.recurringFailures.length > 0
+        ? `\nRecurring failures on this vehicle (appeared multiple MOTs):\n${flags.recurringFailures.map((f) => `- "${f.description}" (${f.occurrences}x, most recent: ${f.mostRecentDate})`).join("\n")}`
+        : "";
 
-Here are the known faults and recalls for this vehicle:
-${faultList}
+      const persistentNote = flags.persistentAdvisories.length > 0
+        ? `\nPersistent advisories (owner has not addressed these):\n${flags.persistentAdvisories.map((f) => `- "${f.description}" (${f.occurrences}x)`).join("\n")}`
+        : "";
 
-Write a concise 2-3 sentence summary of the main risks for a used car buyer. Be direct and practical. Highlight the most serious issues first.`;
+      const prompt = `You are a used car buying assistant. A buyer is considering a ${vehicle.year} ${vehicle.make} ${vehicle.model} (reg: ${vehicle.reg}).
+${clockingNote}
+Issues found on THIS SPECIFIC VEHICLE from its MOT history:
+${vehicleIssues.length > 0 ? vehicleIssues.map((f) => `- ${f.fault_description} (${f.source})`).join("\n") : "None recorded."}
+${recurringNote}${persistentNote}
+
+Model-wide known faults for ${vehicle.make} ${vehicle.model} (${vehicle.year}):
+${modelFaults.length > 0 ? modelFaults.map((f) => `- ${f.fault_description} (${f.fault_category}, severity: ${f.severity})`).join("\n") : "None recorded."}
+
+Augur Score: ${score}/100 — ${verdict}
+Clean MOT streak: ${flags.cleanStreak} consecutive passes.
+
+Write a concise 2-3 sentence buyer summary in plain English. If odometer fraud was detected, lead with that as the primary concern — the true mileage is unknown and the car must be avoided. Then mention any other risks. Be direct and practical — the reader may have no car knowledge.`;
 
       const apiKey = Deno.env.get("GEMINI_API_KEY");
       let geminiData: any = null;
@@ -157,9 +288,20 @@ Write a concise 2-3 sentence summary of the main risks for a used car buyer. Be 
       summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Summary unavailable.";
     }
 
-    return Response.json(
-      { vehicle, summary, faults: faults ?? [], fault_count: faults?.length ?? 0 },
-      { headers: corsHeaders }
-    );
+    return Response.json({
+      vehicle,
+      score,
+      verdict,
+      summary,
+      flags,
+      breakdown,
+      mot_history: motHistory,
+      vehicle_issues: vehicleIssues,
+      model_faults: modelFaults,
+      fault_count: vehicleIssues.length + modelFaults.length,
+      mileage_warning: flags.clockingDetected
+        ? "Mileage discrepancy detected between MOT tests. This is a strong indicator of odometer fraud."
+        : null,
+    }, { headers: corsHeaders });
   },
 };
