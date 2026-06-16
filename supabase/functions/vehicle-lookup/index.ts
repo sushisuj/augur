@@ -257,6 +257,44 @@ export default {
     const aggregateTotalTests: number | undefined =
       aggregateRows?.find((r: any) => r.total_tests !== null)?.total_tests ?? undefined;
 
+    // 2c. Query DVSA recalls for this make/model, filter by build date in TS
+    const { data: recallRows } = await supabase
+      .from("recalls")
+      .select('"Recalls Number","Make","Model","Concern","Defect","Remedy","Launch Date","Build Start","Build End"')
+      .ilike("Make", `%${vehicle.make}%`)
+      .ilike("Model", `%${vehicle.model}%`);
+
+    function parseDMY(s: string | null): Date | null {
+      if (!s || !s.trim()) return null;
+      const parts = s.trim().split("/");
+      if (parts.length !== 3) return null;
+      const [d, m, y] = parts;
+      const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+      return isNaN(date.getTime()) ? null : date;
+    }
+
+    // Approximate vehicle build date as Jan 1 of registration year
+    const vehicleBuildApprox = new Date(vehicle.year, 0, 1);
+
+    const activeRecalls = (recallRows ?? [] as any[]).filter((r: any) => {
+      const buildStart = parseDMY(r["Build Start"]);
+      const buildEnd   = parseDMY(r["Build End"]);
+      // No build dates = recall applies to all builds of that model
+      if (!buildStart && !buildEnd) return true;
+      if (buildStart && vehicleBuildApprox < buildStart) return false;
+      if (buildEnd   && vehicleBuildApprox > buildEnd)   return false;
+      return true;
+    }).map((r: any) => ({
+      recall_number: r["Recalls Number"],
+      concern:       r["Concern"],
+      defect:        r["Defect"],
+      remedy:        r["Remedy"],
+      launch_date:   r["Launch Date"],
+      build_start:   r["Build Start"],
+      build_end:     r["Build End"],
+      provenance:    "DVSA Recall",
+    }));
+
     // 3. Compute Augur Score using scoring.ts
     const rawTests = motTests ?? [];
     const scoring = computeScore(rawTests, modelFaults, aggregatePassRate);
@@ -287,6 +325,9 @@ ${recurringNote}${persistentNote}
 
 Model-wide known faults for ${vehicle.make} ${vehicle.model} (${vehicle.year}):
 ${modelFaults.length > 0 ? modelFaults.map((f) => `- ${f.fault_description} (${f.fault_category}, severity: ${f.severity})`).join("\n") : "None recorded."}
+
+Active DVSA recalls for this vehicle (build year ~${vehicle.year}):
+${activeRecalls.length > 0 ? activeRecalls.map((r: { concern: any; defect: any; recall_number: any; launch_date: any; }) => `- ${r.concern}: ${r.defect} (Recall ${r.recall_number}, issued ${r.launch_date})`).join("\n") : "No active recalls found."}
 
 Population reliability (DVSA MOT data, ${vehicle.make} ${vehicle.model} ${vehicle.year} bracket):
 ${aggregatePassRate !== undefined
@@ -341,6 +382,7 @@ Write a concise 2-3 sentence buyer summary in plain English. If odometer fraud w
         total_tests: aggregateTotalTests,
         source: "DVSA MOT Anonymised Test Data 2024",
       } : null,
+      recalls: activeRecalls,
     }, { headers: corsHeaders });
   },
 };
