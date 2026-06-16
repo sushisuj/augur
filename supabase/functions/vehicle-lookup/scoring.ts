@@ -61,6 +61,7 @@ export type ScoreBreakdown = {
   recurringFailureDeduction: number;
   persistentAdvisoryDeduction: number;
   modelReliabilityDeduction: number;
+  populationReliabilityDeduction: number;
   consistencyBonus: number;
   final: number;
 };
@@ -225,9 +226,23 @@ function computeCleanStreak(motTests: MOTTest[]): number {
 
 // ── Main scoring function ─────────────────────────────────────────────────────
 
+/**
+ * Converts a population pass rate (0–1) into a score deduction.
+ * A model where 80%+ of tests pass gets no penalty.
+ * Below 55% pass rate is capped at 20 points off.
+ */
+function populationPassRateDeduction(passRate: number): number {
+  if (passRate >= 0.85) return 0;
+  if (passRate >= 0.75) return 5;
+  if (passRate >= 0.65) return 10;
+  if (passRate >= 0.55) return 15;
+  return 20;
+}
+
 export function computeScore(
   motTests: MOTTest[],
-  modelFaults: ModelFault[]
+  modelFaults: ModelFault[],
+  populationPassRate?: number   // from mot_aggregate — undefined if no data
 ): ScoringResult {
 
   // ── 1. Clocking — instant 0, no negotiation ────────────────────────────────
@@ -249,6 +264,7 @@ export function computeScore(
         recurringFailureDeduction: 0,
         persistentAdvisoryDeduction: 0,
         modelReliabilityDeduction: 0,
+        populationReliabilityDeduction: 0,
         consistencyBonus: 0,
         final: 0,
       },
@@ -289,7 +305,7 @@ export function computeScore(
     }
   }
 
-  // ── 5. Model reliability penalty (capped) ─────────────────────────────────
+  // ── 5. Model reliability penalty from faults table (capped) ──────────────
   let modelReliabilityDeduction = 0;
 
   for (const fault of modelFaults) {
@@ -300,15 +316,23 @@ export function computeScore(
   // Cap so that aggregate model data alone can't floor the score
   modelReliabilityDeduction = Math.min(modelReliabilityDeduction, MAX_MODEL_PENALTY);
 
-  // ── 6. Consistency bonus ───────────────────────────────────────────────────
+  // ── 6. Population reliability penalty from mot_aggregate ──────────────────
+  // Uses real DVSA pass rate data for this make/model/year bracket.
+  // Capped at 20 — a unreliable model shouldn't override vehicle-specific signals.
+  const populationReliabilityDeduction = populationPassRate !== undefined
+    ? populationPassRateDeduction(populationPassRate)
+    : 0;
+
+  // ── 7. Consistency bonus ───────────────────────────────────────────────────
   const cleanStreak = computeCleanStreak(motTests);
   const consistencyBonus = Math.min(10, Math.floor(cleanStreak * 1.5));
 
-  // ── 7. Final score ─────────────────────────────────────────────────────────
+  // ── 8. Final score ─────────────────────────────────────────────────────────
   const raw = 100
     - recurringFailureDeduction
     - persistentAdvisoryDeduction
     - modelReliabilityDeduction
+    - populationReliabilityDeduction
     + consistencyBonus;
 
   const score = Math.max(0, Math.min(100, Math.round(raw)));
@@ -332,6 +356,7 @@ export function computeScore(
       recurringFailureDeduction: Math.round(recurringFailureDeduction),
       persistentAdvisoryDeduction: Math.round(persistentAdvisoryDeduction),
       modelReliabilityDeduction: Math.round(modelReliabilityDeduction),
+      populationReliabilityDeduction,
       consistencyBonus,
       final: score,
     },

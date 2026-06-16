@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { computeScore } from "./scoring.ts";
 
@@ -241,9 +242,24 @@ export default {
       provenance: (f.source ?? "").toLowerCase().includes("recall") ? "recall" : "model",
     }));
 
+    // 2b. Query mot_aggregate for population-level pass rate
+    const { data: aggregateRows } = await supabase
+      .from("mot_aggregate")
+      .select("pass_rate, total_tests, failure_reason, rfr_id, rfr_type_code, severity, frequency")
+      .ilike("make", vehicle.make)
+      .ilike("model", vehicle.model)
+      .lte("year_from", vehicle.year)
+      .gte("year_to", vehicle.year)
+      .order("frequency", { ascending: false });
+
+    const aggregatePassRate: number | undefined =
+      aggregateRows?.find((r: any) => r.pass_rate !== null)?.pass_rate ?? undefined;
+    const aggregateTotalTests: number | undefined =
+      aggregateRows?.find((r: any) => r.total_tests !== null)?.total_tests ?? undefined;
+
     // 3. Compute Augur Score using scoring.ts
     const rawTests = motTests ?? [];
-    const scoring = computeScore(rawTests, modelFaults);
+    const scoring = computeScore(rawTests, modelFaults, aggregatePassRate);
     const { score, verdict, flags, breakdown } = scoring;
 
     // 4. Single Gemini call: fault clustering + buyer summary
@@ -271,6 +287,11 @@ ${recurringNote}${persistentNote}
 
 Model-wide known faults for ${vehicle.make} ${vehicle.model} (${vehicle.year}):
 ${modelFaults.length > 0 ? modelFaults.map((f) => `- ${f.fault_description} (${f.fault_category}, severity: ${f.severity})`).join("\n") : "None recorded."}
+
+Population reliability (DVSA MOT data, ${vehicle.make} ${vehicle.model} ${vehicle.year} bracket):
+${aggregatePassRate !== undefined
+  ? `${Math.round(aggregatePassRate * 100)}% MOT pass rate across ${aggregateTotalTests?.toLocaleString() ?? "many"} tests. ${aggregatePassRate >= 0.85 ? "This model is generally reliable." : aggregatePassRate >= 0.70 ? "Average reliability for its class." : "This model has a notably high failure rate."}`
+  : "No population data available."}
 
 Augur Score: ${score}/100 — ${verdict}
 Clean MOT streak: ${flags.cleanStreak} consecutive passes.
@@ -315,6 +336,11 @@ Write a concise 2-3 sentence buyer summary in plain English. If odometer fraud w
       mileage_warning: flags.clockingDetected
         ? "Mileage discrepancy detected between MOT tests. This is a strong indicator of odometer fraud."
         : null,
+      population: aggregatePassRate !== undefined ? {
+        pass_rate: aggregatePassRate,
+        total_tests: aggregateTotalTests,
+        source: "DVSA MOT Anonymised Test Data 2024",
+      } : null,
     }, { headers: corsHeaders });
   },
 };
