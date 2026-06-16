@@ -14,7 +14,7 @@ Work top to bottom. Each section unblocks the next.
   - `cd augur/supabase/functions/vehicle-lookup && deno run scoring.test.ts`
   - Should see 11 passed, 0 failed. Fix any failures before moving on.
 
-- [ ] **EAS build — get app on a physical device**
+- [x] **EAS build — get app on a physical device**
   - Expo Go doesn't support SDK 56
   - `npm install -g eas-cli` → `eas build --platform ios --profile development`
   - Test EN62LSK (expect 0/100, fraud highlighted) and a clean car on real hardware

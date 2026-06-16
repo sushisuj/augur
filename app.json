@@ -16,7 +16,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.sushisuj.augur"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -24,6 +25,12 @@
     "plugins": [
       "expo-router",
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "406f6e6f-b61c-4791-9b89-f2bd88f3ab50"
+      }
+    }
   }
 }
