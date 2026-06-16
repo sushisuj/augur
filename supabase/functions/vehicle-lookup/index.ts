@@ -337,7 +337,11 @@ ${aggregatePassRate !== undefined
 Augur Score: ${score}/100 — ${verdict}
 Clean MOT streak: ${flags.cleanStreak} consecutive passes.
 
-Write a concise 2-3 sentence buyer summary in plain English. If odometer fraud was detected, lead with that as the primary concern — the true mileage is unknown and the car must be avoided. Then mention any other risks. Be direct and practical — the reader may have no car knowledge.`;
+Write a concise 2-3 sentence buyer summary in plain English. Follow these rules strictly:
+- If odometer fraud was detected, lead with that — the true mileage is unknown and the car must be avoided.
+- If active recalls are listed above, tell the buyer to ask the seller whether the recall was completed, and mention that any main dealer can verify this against the VIN for free.
+- If no recalls are listed, do not mention recalls at all.
+- Be direct and practical — the reader may have no car knowledge. No filler phrases.`;
 
       const apiKey = Deno.env.get("GEMINI_API_KEY");
       let geminiData: any = null;
