@@ -6,11 +6,11 @@ Work top to bottom. Each section unblocks the next.
 
 ## 1. Housekeeping (do first)
 
-- [ ] **Git commit all current changes**
+- [x] **Git commit all current changes**
   - Files: `app/results.tsx`, `supabase/functions/vehicle-lookup/index.ts`, `supabase/functions/vehicle-lookup/scoring.ts`, `supabase/functions/vehicle-lookup/scoring.test.ts`
   - Suggested message: `feat: scoring algorithm, fraud detection, results UI overhaul`
 
-- [ ] **Run scoring.test.ts properly**
+- [x] **Run scoring.test.ts properly**
   - `cd augur/supabase/functions/vehicle-lookup && deno run scoring.test.ts`
   - Should see 11 passed, 0 failed. Fix any failures before moving on.
 
