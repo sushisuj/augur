@@ -103,6 +103,13 @@ const SEVERITY_COLOR: Record<string, string> = {
   Low: "#38a169",
 };
 
+const PROVENANCE_COLOR: Record<string, string> = {
+  "DVSA Recall":  "#c53030",
+  "Honest John":  "#6b46c1",
+  "Augur Research": "#2b6cb0",
+  "DVSA MOT":     "#276749",
+};
+
 const VERDICT_COLOR: Record<string, string> = {
   Buy: "#38a169",
   Consider: "#dd6b20",
@@ -422,8 +429,15 @@ export default function ResultsScreen() {
             <View key={i} style={styles.faultCard}>
               <View style={styles.faultHeader}>
                 <Text style={styles.faultCategory}>{fault.fault_category}</Text>
-                <View style={[styles.severityBadge, { backgroundColor: SEVERITY_COLOR[fault.severity] ?? "#999" }]}>
-                  <Text style={styles.severityText}>{fault.severity}</Text>
+                <View style={styles.faultBadgeRow}>
+                  {fault.provenance && (
+                    <View style={[styles.provenanceBadge, PROVENANCE_COLOR[fault.provenance] && { backgroundColor: PROVENANCE_COLOR[fault.provenance] }]}>
+                      <Text style={styles.provenanceText}>{fault.provenance}</Text>
+                    </View>
+                  )}
+                  <View style={[styles.severityBadge, { backgroundColor: SEVERITY_COLOR[fault.severity] ?? "#999" }]}>
+                    <Text style={styles.severityText}>{fault.severity}</Text>
+                  </View>
                 </View>
               </View>
               <Text style={styles.faultDescription}>{cleanText(fault.fault_description)}</Text>
@@ -596,6 +610,14 @@ const styles = StyleSheet.create({
   severityText: { color: "#fff", fontSize: 11, fontWeight: "600" },
   faultDescription: { fontSize: 14, color: "#555", lineHeight: 20 },
   faultSource: { fontSize: 11, color: "#aaa", marginTop: 4 },
+  faultBadgeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  provenanceBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#718096",
+  },
+  provenanceText: { color: "#fff", fontSize: 10, fontWeight: "600" },
 
   // Fraud-highlighted MOT rows
   motRowFraud: {

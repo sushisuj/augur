@@ -95,7 +95,7 @@ export default {
                       ? "DVSA Recall"
                       : (f.source ?? "").toLowerCase().includes("honest john")
                         ? "Honest John"
-                        : "Curated",
+                        : "Augur Research",
     }));
 
     // ── 2. Query recalls table ────────────────────────────────────────────────
