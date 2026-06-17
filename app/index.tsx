@@ -18,7 +18,7 @@ const C = {
   accent:     "#c4e840",
   accentDark: "#48591E",
   textPrimary:"#e8e6e0",
-  textMuted:  "#555",
+  textMuted:  "#888",
 };
 
 export default function HomeScreen() {
@@ -46,7 +46,7 @@ export default function HomeScreen() {
 
         {/* ── Wordmark ── */}
         <Text style={styles.title}>Augur</Text>
-        <Text style={styles.subtitle}>Used car intelligence</Text>
+        <Text style={styles.subtitle}>Confidence without Expertise</Text>
 
         {/* ── Input ── */}
         {mode === "reg" ? (
@@ -63,6 +63,7 @@ export default function HomeScreen() {
               maxLength={8}
               onSubmitEditing={handleSearch}
             />
+            <View style={styles.plateStripeSpacer} />
           </View>
         ) : (
           <View style={styles.vinContainer}>
@@ -151,6 +152,9 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     color: "#1a1a1a",
     paddingVertical: 16,
+  },
+  plateStripeSpacer: {
+    width: 12,
   },
 
   // ── VIN input ────────────────────────────────────────────────────────────────
