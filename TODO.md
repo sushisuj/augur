@@ -27,30 +27,30 @@ This is the foundation everything else depends on. The supervisor's concern was 
 
 ### 2a. DVSA Anonymised MOT Test Data (Primary Source)
 
-- [ ] **Download the 2024 bulk dataset from GOV.UK**
+- [x] **Download the 2024 bulk dataset from GOV.UK**
   - Two files: test results file + failure items file
   - Join on shared test identifier to link outcomes to failure reasons
 
-- [ ] **Write an ingestion script**
+- [x] **Write an ingestion script**
   - Calculate model-level pass rates per make/model/age bracket
   - Rank the most frequent failure reasons per make/model/age
   - Output: structured rows ready for Supabase import
 
-- [ ] **Import into Supabase**
+- [x] **Import into Supabase**
   - New table: `mot_aggregate` (make, model, year_from, year_to, failure_reason, frequency, pass_rate)
   - This replaces the manually seeded `faults` table as the primary reliability source
   - Keep manually seeded data — it gets a `source: "curated"` provenance tag
 
 ### 2b. DVSA Vehicle Recall Data (Safety Layer)
 
-- [ ] **Download the DVSA recall dataset from GOV.UK**
+- [x] **Download the DVSA recall dataset from GOV.UK**
   - Fields: make, model, defect description, remedy, build date range of affected vehicles
 
-- [ ] **Import into Supabase**
+- [x] **Import into Supabase**
   - New table: `recalls` (make, model, defect, remedy, build_date_from, build_date_to)
   - Filter at query time by the specific vehicle's build date — no hard age cutoff needed
 
-- [ ] **Wire up to Edge Function**
+- [x] **Wire up to Edge Function**
   - When a reg is looked up, query `recalls` filtered by make + model + vehicle build date
   - Surface relevant recalls in the results — these are safety-critical, show them prominently
   - Provenance tag: `"DVSA Recall"`
@@ -77,13 +77,13 @@ This is a core technical contribution, not just a backend task. The AI layer cur
   - Create GIN indexes for fast keyword lookup
   - Test queries: searching "brake", "gearbox slip", "electrical fault" should return ranked relevant records
 
-- [ ] **Build a new Edge Function: `fault-search`**
+- [x] **Build a new Edge Function: `fault-search`**
   - Accepts: `make`, `model`, `year`, `keywords[]`
   - Queries `faults` + `recalls` + `mot_aggregate` using full-text search
   - Returns: ranked fault records with source, severity, frequency, and provenance tag
   - This is the endpoint the AI (and later the diagnosis module) calls
 
-- [ ] **Update `vehicle-lookup` to call `fault-search` instead of direct DB query**
+- [x] **Update `vehicle-lookup` to call `fault-search` instead of direct DB query**
   - Currently does `.ilike("make", ...).ilike("model", ...)` — swap for `fault-search` call
   - Every fault in the Gemini prompt now comes from an indexed, attributed API response
   - This makes every AI claim auditable: you can trace it back to a specific DB record

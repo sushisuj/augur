@@ -223,77 +223,62 @@ export default {
       return Response.json({ error: `Vehicle lookup failed: ${err.message}` }, { status: 500, headers: corsHeaders });
     }
 
-    // 2. Query model-level faults from our DB
-    const { data: rawFaults, error } = await supabase
-      .from("faults")
-      .select("fault_description, fault_category, severity, source, year_from, year_to")
-      .ilike("make", vehicle.make)
-      .ilike("model", `%${vehicle.model}%`)
-      .lte("year_from", vehicle.year)
-      .gte("year_to", vehicle.year)
-      .order("severity", { ascending: false });
+    // 2. Call fault-search Edge Function for all model-level data
+    const faultSearchUrl = new URL(
+      `/functions/v1/fault-search?make=${encodeURIComponent(vehicle.make)}&model=${encodeURIComponent(vehicle.model)}&year=${vehicle.year}`,
+      Deno.env.get("SUPABASE_URL")!
+    );
 
-    if (error) {
-      return Response.json({ error: error.message }, { status: 500, headers: corsHeaders });
+    const faultSearchRes = await fetch(faultSearchUrl.toString(), {
+      headers: {
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")!}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    let faultSearchData: any = { results: [], population: null, counts: { faults: 0, recalls: 0 } };
+    if (faultSearchRes.ok) {
+      faultSearchData = await faultSearchRes.json();
+    } else {
+      const errText = await faultSearchRes.text();
+      return Response.json(
+        { error: `fault-search failed (${faultSearchRes.status}): ${errText}`, url: faultSearchUrl.toString() },
+        { status: 500, headers: corsHeaders }
+      );
     }
 
-    const modelFaults = dedupFaults(rawFaults ?? []).map((f) => ({
-      ...f,
-      provenance: (f.source ?? "").toLowerCase().includes("recall") ? "recall" : "model",
-    }));
+    // Separate results by provenance
+    const allResults: any[] = faultSearchData.results ?? [];
 
-    // 2b. Query mot_aggregate for population-level pass rate
-    const { data: aggregateRows } = await supabase
-      .from("mot_aggregate")
-      .select("pass_rate, total_tests, failure_reason, rfr_id, rfr_type_code, severity, frequency")
-      .ilike("make", vehicle.make)
-      .ilike("model", vehicle.model)
-      .lte("year_from", vehicle.year)
-      .gte("year_to", vehicle.year)
-      .order("frequency", { ascending: false });
+    const activeRecalls = allResults
+      .filter((r: any) => r.provenance === "DVSA Recall")
+      .map((r: any) => ({
+        recall_number: r.recall_number,
+        concern:       r.concern,
+        defect:        r.description,
+        remedy:        r.remedy,
+        launch_date:   r.source,
+        build_start:   r.build_start,
+        build_end:     r.build_end,
+        provenance:    "DVSA Recall",
+      }));
+
+    const rawFaults = allResults
+      .filter((r: any) => r.provenance !== "DVSA Recall")
+      .map((r: any) => ({
+        fault_description: r.description,
+        fault_category:    r.category,
+        severity:          r.severity,
+        source:            r.source,
+        provenance:        r.provenance,
+      }));
+
+    const modelFaults = dedupFaults(rawFaults);
 
     const aggregatePassRate: number | undefined =
-      aggregateRows?.find((r: any) => r.pass_rate !== null)?.pass_rate ?? undefined;
+      faultSearchData.population?.pass_rate ?? undefined;
     const aggregateTotalTests: number | undefined =
-      aggregateRows?.find((r: any) => r.total_tests !== null)?.total_tests ?? undefined;
-
-    // 2c. Query DVSA recalls for this make/model, filter by build date in TS
-    const { data: recallRows } = await supabase
-      .from("recalls")
-      .select('"Recalls Number","Make","Model","Concern","Defect","Remedy","Launch Date","Build Start","Build End"')
-      .ilike("Make", `%${vehicle.make}%`)
-      .ilike("Model", `%${vehicle.model}%`);
-
-    function parseDMY(s: string | null): Date | null {
-      if (!s || !s.trim()) return null;
-      const parts = s.trim().split("/");
-      if (parts.length !== 3) return null;
-      const [d, m, y] = parts;
-      const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-      return isNaN(date.getTime()) ? null : date;
-    }
-
-    // Approximate vehicle build date as Jan 1 of registration year
-    const vehicleBuildApprox = new Date(vehicle.year, 0, 1);
-
-    const activeRecalls = (recallRows ?? [] as any[]).filter((r: any) => {
-      const buildStart = parseDMY(r["Build Start"]);
-      const buildEnd   = parseDMY(r["Build End"]);
-      // No build dates = recall applies to all builds of that model
-      if (!buildStart && !buildEnd) return true;
-      if (buildStart && vehicleBuildApprox < buildStart) return false;
-      if (buildEnd   && vehicleBuildApprox > buildEnd)   return false;
-      return true;
-    }).map((r: any) => ({
-      recall_number: r["Recalls Number"],
-      concern:       r["Concern"],
-      defect:        r["Defect"],
-      remedy:        r["Remedy"],
-      launch_date:   r["Launch Date"],
-      build_start:   r["Build Start"],
-      build_end:     r["Build End"],
-      provenance:    "DVSA Recall",
-    }));
+      faultSearchData.population?.total_tests ?? undefined;
 
     // 3. Compute Augur Score using scoring.ts
     const rawTests = motTests ?? [];

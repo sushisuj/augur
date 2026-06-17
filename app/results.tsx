@@ -24,6 +24,17 @@ type Fault = {
   provenance?: string;
 };
 
+type Recall = {
+  recall_number: string;
+  concern: string;
+  defect: string;
+  remedy: string;
+  launch_date: string;
+  build_start: string | null;
+  build_end: string | null;
+  provenance: string;
+};
+
 type MOTTest = {
   date: string;
   result: string;
@@ -71,6 +82,7 @@ type VehicleResult = {
   model_faults: Fault[];
   fault_count: number;
   mileage_warning: string | null;
+  recalls: Recall[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,6 +124,7 @@ export default function ResultsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [motExpanded, setMotExpanded] = useState(false);
   const [knownExpanded, setKnownExpanded] = useState(false);
+  const [recallsExpanded, setRecallsExpanded] = useState(false);
 
   useEffect(() => {
     if (!reg) return;
@@ -244,6 +257,36 @@ export default function ResultsScreen() {
         <View style={styles.dangerCard}>
           <Text style={styles.dangerTitle}>Odometer Fraud Detected</Text>
           <Text style={styles.dangerText}>{data.mileage_warning}</Text>
+        </View>
+      )}
+
+      {/* Active recalls */}
+      {data.recalls?.length > 0 && (
+        <View style={styles.recallCard}>
+          <Text style={styles.recallTitle}>
+            Active Recall{data.recalls.length > 1 ? "s" : ""} ({data.recalls.length})
+          </Text>
+          <Text style={styles.recallSubtitle}>
+            This vehicle falls within the build date range of a DVSA safety recall. Ask the seller whether this was completed — any main dealer can verify it against the VIN for free.
+          </Text>
+          {(recallsExpanded ? data.recalls : data.recalls.slice(0, PREVIEW_COUNT)).map((recall, i) => (
+            <View key={i} style={styles.recallItem}>
+              <Text style={styles.recallConcern}>{recall.concern}</Text>
+              <Text style={styles.recallDefect}>{recall.defect}</Text>
+              <Text style={styles.recallMeta}>
+                Recall {recall.recall_number}
+                {recall.build_start ? `  |  Affects builds ${recall.build_start} – ${recall.build_end ?? "onwards"}` : ""}
+              </Text>
+            </View>
+          ))}
+          {data.recalls.length > PREVIEW_COUNT && (
+            <TouchableOpacity
+              style={styles.expandButton}
+              onPress={() => setRecallsExpanded(!recallsExpanded)}
+            >
+              <Text style={styles.expandChevron}>{recallsExpanded ? "∧" : "∨"}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -564,6 +607,28 @@ const styles = StyleSheet.create({
   },
   motDateFraud: { color: "#c53030" },
   motMileageFraud: { color: "#e53e3e", fontWeight: "600" },
+
+  // Recall card
+  recallCard: {
+    backgroundColor: "#fff5f5",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: "#c53030",
+  },
+  recallTitle: { fontSize: 14, fontWeight: "700", color: "#c53030", marginBottom: 4 },
+  recallSubtitle: { fontSize: 12, color: "#c53030", marginBottom: 12, lineHeight: 18 },
+  recallItem: {
+    borderTopWidth: 1,
+    borderTopColor: "#fed7d7",
+    paddingTop: 10,
+    marginTop: 10,
+    gap: 4,
+  },
+  recallConcern: { fontSize: 13, fontWeight: "600", color: "#742a2a" },
+  recallDefect: { fontSize: 13, color: "#c53030", lineHeight: 18 },
+  recallMeta: { fontSize: 11, color: "#e53e3e", marginTop: 2 },
 
   // Expand/collapse button
   expandButton: {
