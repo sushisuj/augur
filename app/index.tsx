@@ -10,10 +10,16 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 
-// A VIN is always exactly 17 alphanumeric characters (no I, O, Q)
-function isVIN(input: string): boolean {
-  return /^[A-HJ-NPR-Z0-9]{17}$/.test(input);
-}
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg:         "#0d0f0a",
+  surface:    "#131510",
+  border:     "#1f2118",
+  accent:     "#c4e840",
+  accentDark: "#48591E",
+  textPrimary:"#e8e6e0",
+  textMuted:  "#555",
+};
 
 export default function HomeScreen() {
   const [mode, setMode] = useState<"reg" | "vin">("reg");
@@ -23,11 +29,7 @@ export default function HomeScreen() {
   const handleSearch = () => {
     const cleaned = input.trim().toUpperCase().replace(/\s/g, "");
     if (!cleaned) return;
-    if (mode === "vin") {
-      router.push(`/results?vin=${cleaned}`);
-    } else {
-      router.push(`/results?reg=${cleaned}`);
-    }
+    router.push(mode === "vin" ? `/results?vin=${cleaned}` : `/results?reg=${cleaned}`);
   };
 
   const switchMode = (next: "reg" | "vin") => {
@@ -41,9 +43,12 @@ export default function HomeScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.inner}>
+
+        {/* ── Wordmark ── */}
         <Text style={styles.title}>Augur</Text>
         <Text style={styles.subtitle}>Used car intelligence</Text>
 
+        {/* ── Input ── */}
         {mode === "reg" ? (
           <View style={styles.plateContainer}>
             <View style={styles.plateStripe} />
@@ -52,7 +57,7 @@ export default function HomeScreen() {
               value={input}
               onChangeText={setInput}
               placeholder="AB15 XYZ"
-              placeholderTextColor="#999"
+              placeholderTextColor="#b0a060"
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={8}
@@ -65,8 +70,8 @@ export default function HomeScreen() {
               style={styles.vinInput}
               value={input}
               onChangeText={setInput}
-              placeholder="e.g. WF0FXXGCHF8R12345"
-              placeholderTextColor="#999"
+              placeholder="WF0FXXGCHF8R12345"
+              placeholderTextColor={C.textMuted}
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={17}
@@ -76,19 +81,18 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <TouchableOpacity style={styles.button} onPress={handleSearch}>
+        {/* ── CTA ── */}
+        <TouchableOpacity style={styles.button} onPress={handleSearch} activeOpacity={0.85}>
           <Text style={styles.buttonText}>Check this car</Text>
         </TouchableOpacity>
 
-        {mode === "reg" ? (
-          <TouchableOpacity onPress={() => switchMode("vin")}>
-            <Text style={styles.switchLink}>Search by VIN instead</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={() => switchMode("reg")}>
-            <Text style={styles.switchLink}>Search by Registration Plate instead</Text>
-          </TouchableOpacity>
-        )}
+        {/* ── Mode toggle ── */}
+        <TouchableOpacity onPress={() => switchMode(mode === "reg" ? "vin" : "reg")}>
+          <Text style={styles.switchLink}>
+            {mode === "reg" ? "Search by VIN instead" : "Search by Registration Plate instead"}
+          </Text>
+        </TouchableOpacity>
+
       </View>
     </KeyboardAvoidingView>
   );
@@ -97,35 +101,39 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: C.bg,
   },
   inner: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
-  },
-  title: {
-    fontSize: 48,
-    fontWeight: "bold",
-    color: "#1a1a1a",
-    letterSpacing: -1,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 48,
+    paddingHorizontal: 24,
   },
 
-  // ── Reg plate input ──────────────────────────────────────────────────────────
+  // ── Wordmark ─────────────────────────────────────────────────────────────────
+  title: {
+    fontSize: 52,
+    fontWeight: "800",
+    color: C.textPrimary,
+    letterSpacing: -2,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: C.textMuted,
+    letterSpacing: 0.5,
+    marginBottom: 52,
+  },
+
+  // ── Reg plate ────────────────────────────────────────────────────────────────
   plateContainer: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f7d94c",
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: "#1a1a1a",
-    marginBottom: 24,
+    marginBottom: 16,
     overflow: "hidden",
     width: "100%",
     maxWidth: 320,
@@ -149,48 +157,50 @@ const styles = StyleSheet.create({
   vinContainer: {
     width: "100%",
     maxWidth: 320,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   vinInput: {
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: "#1a1a1a",
-    fontSize: 18,
+    backgroundColor: C.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    fontSize: 16,
     fontWeight: "600",
     textAlign: "center",
     letterSpacing: 2,
-    color: "#1a1a1a",
+    color: C.textPrimary,
     paddingVertical: 18,
     paddingHorizontal: 12,
     fontFamily: Platform.OS === "ios" ? "Courier New" : "monospace",
   },
   vinHint: {
-    fontSize: 12,
-    color: "#888",
+    fontSize: 11,
+    color: C.textMuted,
     textAlign: "center",
     marginTop: 6,
   },
 
-  // ── Shared ───────────────────────────────────────────────────────────────────
+  // ── Button ───────────────────────────────────────────────────────────────────
   button: {
-    backgroundColor: "#1a1a1a",
+    backgroundColor: C.accentDark,
     paddingVertical: 16,
-    paddingHorizontal: 48,
-    borderRadius: 8,
+    borderRadius: 10,
     width: "100%",
     maxWidth: 320,
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 20,
   },
   buttonText: {
     color: "#fff",
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
+    letterSpacing: 0.3,
   },
+
+  // ── Mode switch ──────────────────────────────────────────────────────────────
   switchLink: {
-    fontSize: 14,
-    color: "#555",
+    fontSize: 13,
+    color: C.textMuted,
     textDecorationLine: "underline",
   },
 });
