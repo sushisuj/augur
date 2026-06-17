@@ -117,13 +117,31 @@ Depends on Section 3 being in place. The confidence scores come from indexed fau
   - Sends original symptom + candidate fault descriptions to Gemini
   - Returns relevance scores 0.0–1.0 per fault
 
-- [x] **Step 4 — confidence calculation**
-  - Provenance weights: DVSA Recall × 0.50, HJ/Augur Research × 0.35, DVSA MOT × 0.15
-  - `confidence = relevance_score × provenance_weight × 100`, sorted descending, top 5 returned
+- [x] **Step 0 — symptom-to-system classification (Gemini call 0)** ← added this session
+  - Runs in parallel with keyword extraction (no added latency)
+  - Classifies symptom into one of 15 vehicle systems: Brakes, Engine, Steering, etc.
+  - Returns `vehicle_system` + `system_confidence` (high/medium/low) in response
+
+- [x] **Step 4 — confidence calculation** ← rebalanced this session
+  - Old: `relevance × provenance_weight × 200` — structurally capped MOT faults at 30%
+  - New: `(relevance × 0.70 + provenance_bonus × 0.30) × 100` — relevance dominates
+  - Provenance bonuses: DVSA Recall 1.00, HJ/Augur 0.80, DVSA MOT 0.50
+  - Filter: `relevance >= 25% AND confidence >= 20` — prevents zero-relevance recalls surfacing
+  - Scoring prompt made strict: Gemini penalised for loose/indirect connections
+
+- [x] **Step 5 — AI fallback guidance (Gemini call 3, conditional)** ← added this session
+  - Only fires when diagnoses array is empty after filtering
+  - Gemini produces 2–3 sentences of general guidance: system likely involved, what a mechanic checks, recommendation to inspect
+  - Explicitly told not to invent specific fault names or part numbers
+  - Returned as `fallback_guidance` string (null if not triggered)
 
 - [x] **Deploy and test**
-  - Deployed and tested with Ford Mondeo 2018, "engine knocking in gear 2"
-  - Returned 3 DVSA Recall results at 90/90/80% — semantically valid matches
+  - Tested with: Ford Mondeo 2018 "engine knocking in gear 2" → valid recall matches
+  - Tested with: "windscreen fogs inside with heater on" → A/C compressor recall at 86%
+  - Tested with: "car smells like birthday cake when accelerating" → exhaust/cooling recalls at 93%/90% (legitimate connection — sweet smell = coolant burning)
+  - Tested with: "car only breaks down on Tuesdays" → fallback guidance fires correctly
+  - Tested with: "duck quacking when reversing" → steering/suspension results (legitimate — worn CV/ball joint)
+  - Accidental test: deploy command pasted as symptom → Gemini correctly identified it as a software command
 
 ### 4b. App UI
 
@@ -138,7 +156,9 @@ Depends on Section 3 being in place. The confidence scores come from indexed fau
 - [x] **Diagnosis results UI**
   - Ranked cards with confidence circle (coloured ≥70% red, ≥40% amber, <40% grey)
   - Provenance badge per card; caveat banner at top
-  - Empty state message if 0 results returned
+  - Vehicle system classification badge above results ("Classified as · Brakes")
+  - AI fallback guidance card (amber left border, "AI GUIDANCE · not from verified records") when no DB matches
+  - Three-tier graceful degradation: verified results → fallback guidance → empty state
 
 ---
 
@@ -148,9 +168,11 @@ These were already planned but depended on the data layer being solid first.
 
 ### 5a. Loading screen — progress steps
 
-- [ ] Replace blank spinner with sequential step messages
-  - Cycle through: "Fetching MOT history..." → "Analysing faults..." → "Generating buyer summary..."
-  - `useEffect` with `setInterval` advancing through steps every ~1.5s while `loading === true`
+- [x] Replace blank spinner with sequential step messages
+  - Steps: "Fetching MOT history" → "Checking active recalls" → "Analysing fault patterns" → "Generating buyer summary"
+  - `useEffect` with `setInterval` advancing every 1.6s while `loading === true`
+  - Dots: empty (pending) → accent spinner (active) → filled ✓ (done)
+  - Reg plate shown large above the steps
 
 ### 5b. Onboarding survey
 
