@@ -124,7 +124,7 @@ function formatMileage(mileage: number | null, unit: string): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ResultsScreen() {
-  const { reg } = useLocalSearchParams<{ reg: string }>();
+  const { reg, vin } = useLocalSearchParams<{ reg: string; vin: string }>();
   const router = useRouter();
   const [data, setData] = useState<VehicleResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,15 +134,16 @@ export default function ResultsScreen() {
   const [recallsExpanded, setRecallsExpanded] = useState(false);
 
   useEffect(() => {
-    if (!reg) return;
-    fetchVehicle(reg);
-  }, [reg]);
+    if (vin) fetchVehicle({ vin });
+    else if (reg) fetchVehicle({ reg });
+  }, [reg, vin]);
 
-  const fetchVehicle = async (registration: string) => {
+  const fetchVehicle = async (params: { reg?: string; vin?: string }) => {
     setLoading(true);
     setError(null);
+    const qs = params.vin ? `vin=${params.vin}` : `reg=${params.reg}`;
     try {
-      const res = await fetch(`${SUPABASE_FUNCTION_URL}?reg=${registration}`, {
+      const res = await fetch(`${SUPABASE_FUNCTION_URL}?${qs}`, {
         headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -63,6 +63,27 @@ async function getVehicleByReg(reg: string, token: string): Promise<any | null> 
   return res.json();
 }
 
+async function getVehicleByVIN(vin: string, token: string): Promise<any | null> {
+  const res = await fetch(
+    `https://history.mot.api.gov.uk/v1/trade/vehicles/vin/${vin}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Api-Key": Deno.env.get("MOT_API_KEY")!,
+        Accept: "application/json",
+      },
+    }
+  );
+
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`MOT API error ${res.status}: ${text}`);
+  }
+
+  return res.json();
+}
+
 // ── Normalisation ─────────────────────────────────────────────────────────────
 
 function normaliseMake(raw: string): string {
@@ -184,9 +205,10 @@ export default {
 
     const url = new URL(req.url);
     const reg = url.searchParams.get("reg")?.toUpperCase().replace(/\s/g, "");
+    const vin = url.searchParams.get("vin")?.toUpperCase().replace(/\s/g, "");
 
-    if (!reg) {
-      return Response.json({ error: "No registration provided" }, { status: 400, headers: corsHeaders });
+    if (!reg && !vin) {
+      return Response.json({ error: "Provide either reg or vin" }, { status: 400, headers: corsHeaders });
     }
 
     const supabase = createClient(
@@ -202,7 +224,9 @@ export default {
 
     try {
       const token = await getMOTToken();
-      const motData = await getVehicleByReg(reg, token);
+      const motData = vin
+        ? await getVehicleByVIN(vin, token)
+        : await getVehicleByReg(reg!, token);
 
       if (!motData) {
         return Response.json({ error: "Vehicle not found" }, { status: 404, headers: corsHeaders });

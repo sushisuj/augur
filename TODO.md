@@ -72,7 +72,7 @@ This is the foundation everything else depends on. The supervisor's concern was 
 
 This is a core technical contribution, not just a backend task. The AI layer currently generates summaries from a flat prompt. This replaces that with a queryable, indexed data layer the AI retrieves from at runtime — grounding outputs in verifiable records rather than training knowledge.
 
-- [ ] **Enable Postgres full-text search on `faults` and `recalls` tables**
+- [x] **Enable Postgres full-text search on `faults` and `recalls` tables**
   - Add `tsvector` columns to both tables
   - Create GIN indexes for fast keyword lookup
   - Test queries: searching "brake", "gearbox slip", "electrical fault" should return ranked relevant records
@@ -88,35 +88,80 @@ This is a core technical contribution, not just a backend task. The AI layer cur
   - Every fault in the Gemini prompt now comes from an indexed, attributed API response
   - This makes every AI claim auditable: you can trace it back to a specific DB record
 
-- [ ] **Provenance tagging on all API responses**
-  - Every record returned by `fault-search` carries a provenance tag: `"DVSA MOT"`, `"DVSA Recall"`, `"Honest John"`, or `"Curated"`
+- [x] **Provenance tagging on all API responses**
+  - Every record returned by `fault-search` carries a provenance tag: `"DVSA MOT"`, `"DVSA Recall"`, `"Honest John"`, or `"Augur Research"`
   - Pass provenance tags through to the frontend — display source on each fault card in the results UI
+  - Provenance tags in use: `"DVSA MOT"`, `"DVSA Recall"`, `"Honest John"`, `"Augur Research"`
 
 ---
 
 ## 4. Vehicle Diagnosis Module
 
-Depends on the custom API (Section 3) being in place first. The confidence scores come from indexed fault data, not model inference.
+Depends on Section 3 being in place. The confidence scores come from indexed fault records, not model inference — this is what makes them auditable.
 
-- [ ] **New screen: `app/diagnose.tsx`**
-  - Entry point: "Describe what's wrong with the car"
-  - Free-text input field + submit button
-  - Requires a make/model/year to be set (either from a recent lookup or manual input)
+### 4a. Edge Function: `vehicle-diagnose`
 
-- [ ] **Edge Function: `diagnose`**
-  - Input: symptom description (free text) + make + model + year
-  - Step 1: LLM extracts keywords from the symptom description (e.g. "whining noise when turning" → ["steering", "power steering", "noise", "turning"])
-  - Step 2: Call `fault-search` with those keywords
-  - Step 3: Compute confidence scores from weighted combination of:
-    - DVSA MOT failure frequency for this make/model/age (how common is this fault?)
-    - Honest John corroboration (is this a documented known issue?)
-    - DVSA recall match (is there a manufacturer-acknowledged defect?)
-  - Step 4: Return ranked list of probable causes with confidence percentages
+- [x] **Create `supabase/functions/vehicle-diagnose/index.ts`**
+  - Accepts: `make`, `model`, `year`, `symptom` (free text)
+  - Disable JWT verification in Supabase dashboard after deploy
 
-- [ ] **Results UI for diagnosis**
-  - Ranked list: "74% — Power steering pump failure (documented across 2012-2015 Ford Focus, source: DVSA MOT Data)"
-  - Each entry shows confidence %, fault description, and provenance
-  - Caveat banner: "This is not a mechanic's diagnosis. Get the car inspected before buying."
+- [ ] **Step 1 — LLM keyword extraction (Gemini call 1)**
+  - Send symptom to Gemini with a structured prompt: "Extract 3–5 search keywords from this symptom description. Return as a JSON array of strings only."
+  - Example: "whining noise when turning" → `["steering", "power steering", "pump", "noise"]`
+  - Parse JSON from Gemini response; fall back to splitting symptom on spaces if parsing fails
+
+- [ ] **Step 2 — fault-search lookup**
+  - Call `fault-search` internally via HTTP with `make`, `model`, `year`, `keywords` (comma-joined)
+  - Returns candidate faults across all three provenance sources: DVSA Recall, Augur Research/HJ, DVSA MOT
+
+- [ ] **Step 3 — semantic relevance scoring (Gemini call 2)**
+  - Send original symptom + list of candidate fault descriptions to Gemini
+  - Prompt: "For each fault, rate how likely it explains the symptom on a scale of 0.0 to 1.0. Return as a JSON array of numbers in the same order."
+  - This is the NLP mapping step: free-text → structured fault classification
+
+- [ ] **Step 4 — confidence calculation**
+  - Apply provenance weights to each fault's relevance score:
+    - DVSA Recall: × 0.50 (manufacturer-acknowledged defect)
+    - Honest John / Augur Research: × 0.35 (editorially verified)
+    - DVSA MOT: × 0.15 (frequency signal — guards against thin sample sizes)
+  - `confidence = relevance_score × provenance_weight × 100`
+  - Sort descending by confidence, return top 5
+
+- [ ] **Response shape**
+  ```json
+  {
+    "make": "Ford", "model": "Focus", "year": 2014,
+    "symptom": "whining noise when turning",
+    "diagnoses": [
+      { "fault": "Power steering pump failure", "confidence": 74, "category": "Steering", "provenance": "Honest John", "source": "Honest John Carbycar" },
+      { "fault": "Steering rack wear", "confidence": 51, "category": "Steering", "provenance": "DVSA MOT", "source": "DVSA MOT Anonymised Test Data 2024" }
+    ]
+  }
+  ```
+
+- [ ] **Deploy and test**
+  - `supabase functions deploy vehicle-diagnose`
+  - Test via browser URL with a known car and real symptom (e.g. Ford Mondeo 2018, "grinding noise when braking")
+  - Verify confidence scores are plausible and provenance tags are correct
+
+### 4b. App UI
+
+- [ ] **Add entry point to `results.tsx`**
+  - "Diagnose a symptom" button near the bottom of the results screen
+  - Passes `make`, `model`, `year`, `reg` as route params — no re-fetch needed
+
+- [ ] **Create `app/diagnose.tsx`**
+  - Receives `make`, `model`, `year` from params — display as context header ("Diagnosing: 2018 Ford Mondeo")
+  - Free-text input: "Describe what you noticed (e.g. grinding noise when braking)"
+  - Submit button triggers call to `vehicle-diagnose` Edge Function
+  - Loading state while waiting for response
+
+- [ ] **Diagnosis results UI**
+  - Ranked cards: confidence % (large, coloured by threshold) + fault description + category
+  - Confidence colour: ≥70% red, ≥40% amber, <40% grey
+  - Provenance badge on each card (reuse `PROVENANCE_COLOR` from results.tsx)
+  - Example card: "74% likely — Power steering pump failure · Steering · Honest John"
+  - Caveat banner at top: "This is not a mechanic's diagnosis. Have the car inspected before buying."
 
 ---
 
