@@ -7,34 +7,31 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useFonts, BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
 
-// ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
-  bg:         "#0d0f0a",
-  surface:    "#131510",
-  border:     "#1f2118",
-  accent:     "#c4e840",
-  accentDark: "#48591E",
-  textPrimary:"#e8e6e0",
-  textMuted:  "#888",
+  bg:          "#080a07",
+  surface:     "rgba(255,255,255,0.05)",
+  border:      "rgba(255,255,255,0.10)",
+  accent:      "#c2d635",
+  textPrimary: "#ffffff",
+  textMuted:   "#888",
+  danger:      "#e05530",
 };
 
-export default function HomeScreen() {
-  const [mode, setMode] = useState<"reg" | "vin">("reg");
-  const [input, setInput] = useState("");
+export default function AuthScreen() {
   const router = useRouter();
+  const [email, setEmail]       = useState("");
+  const [password, setPassword] = useState("");
+  const [tab, setTab]           = useState<"login" | "register">("login");
+  const [fontsLoaded] = useFonts({ BebasNeue_400Regular });
 
-  const handleSearch = () => {
-    const cleaned = input.trim().toUpperCase().replace(/\s/g, "");
-    if (!cleaned) return;
-    router.push(mode === "vin" ? `/results?vin=${cleaned}` : `/results?reg=${cleaned}`);
-  };
-
-  const switchMode = (next: "reg" | "vin") => {
-    setMode(next);
-    setInput("");
+  const handleContinue = () => {
+    // Mock auth — just route through
+    router.replace("/dashboard");
   };
 
   return (
@@ -44,55 +41,78 @@ export default function HomeScreen() {
     >
       <View style={styles.inner}>
 
-        {/* ── Wordmark ── */}
-        <Text style={styles.title}>Augur</Text>
-        <Text style={styles.subtitle}>Confidence without Expertise</Text>
+        {/* ── Logo + Wordmark ── */}
+        <Image
+          source={require("../assets/icon.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={[styles.title, fontsLoaded && { fontFamily: "BebasNeue_400Regular" }]}>
+          Augur
+        </Text>
+        <Text style={styles.tagline}>Confidence without Expertise</Text>
 
-        {/* ── Input ── */}
-        {mode === "reg" ? (
-          <View style={styles.plateContainer}>
-            <View style={styles.plateStripe} />
+        {/* ── Tab switcher ── */}
+        <View style={styles.tabRow}>
+          <TouchableOpacity
+            style={[styles.tab, tab === "login" && styles.tabActive]}
+            onPress={() => setTab("login")}
+          >
+            <Text style={[styles.tabText, tab === "login" && styles.tabTextActive]}>Sign in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, tab === "register" && styles.tabActive]}
+            onPress={() => setTab("register")}
+          >
+            <Text style={[styles.tabText, tab === "register" && styles.tabTextActive]}>Create account</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Form ── */}
+        <View style={styles.form}>
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Email address"
+            placeholderTextColor={C.textMuted}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TextInput
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor={C.textMuted}
+            secureTextEntry
+            autoCapitalize="none"
+          />
+          {tab === "register" && (
             <TextInput
-              style={styles.plateInput}
-              value={input}
-              onChangeText={setInput}
-              placeholder="AB15 XYZ"
-              placeholderTextColor="#b0a060"
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={8}
-              onSubmitEditing={handleSearch}
-            />
-            <View style={styles.plateStripeSpacer} />
-          </View>
-        ) : (
-          <View style={styles.vinContainer}>
-            <TextInput
-              style={styles.vinInput}
-              value={input}
-              onChangeText={setInput}
-              placeholder="WF0FXXGCHF8R12345"
+              style={styles.input}
+              placeholder="Confirm password"
               placeholderTextColor={C.textMuted}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              maxLength={17}
-              onSubmitEditing={handleSearch}
+              secureTextEntry
+              autoCapitalize="none"
             />
-            <Text style={styles.vinHint}>17-character Vehicle Identification Number</Text>
-          </View>
-        )}
+          )}
+        </View>
 
         {/* ── CTA ── */}
-        <TouchableOpacity style={styles.button} onPress={handleSearch} activeOpacity={0.85}>
-          <Text style={styles.buttonText}>Check this car</Text>
-        </TouchableOpacity>
-
-        {/* ── Mode toggle ── */}
-        <TouchableOpacity onPress={() => switchMode(mode === "reg" ? "vin" : "reg")}>
-          <Text style={styles.switchLink}>
-            {mode === "reg" ? "Search by VIN instead" : "Search by Registration Plate instead"}
+        <TouchableOpacity style={styles.button} onPress={handleContinue} activeOpacity={0.85}>
+          <Text style={styles.buttonText}>
+            {tab === "login" ? "Sign in" : "Create account"}
           </Text>
         </TouchableOpacity>
+
+        {/* ── Forgot password ── */}
+        {tab === "login" && (
+          <TouchableOpacity onPress={() => {}}>
+            <Text style={styles.forgotText}>Forgot password?</Text>
+          </TouchableOpacity>
+        )}
 
       </View>
     </KeyboardAvoidingView>
@@ -100,109 +120,99 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: C.bg,
-  },
+  container: { flex: 1, backgroundColor: C.bg },
   inner: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
   },
 
-  // ── Wordmark ─────────────────────────────────────────────────────────────────
+  // ── Branding ──────────────────────────────────────────────────────────────────
+  logo: {
+    width: 80,
+    height: 80,
+    marginBottom: 8,
+  },
   title: {
     fontSize: 52,
-    fontWeight: "800",
     color: C.textPrimary,
-    letterSpacing: -2,
+    letterSpacing: 4,
     marginBottom: 4,
   },
-  subtitle: {
-    fontSize: 14,
+  tagline: {
+    fontSize: 12,
     color: C.textMuted,
     letterSpacing: 0.5,
-    marginBottom: 52,
+    marginBottom: 40,
   },
 
-  // ── Reg plate ────────────────────────────────────────────────────────────────
-  plateContainer: {
+  // ── Tab ───────────────────────────────────────────────────────────────────────
+  tabRow: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f7d94c",
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#1a1a1a",
-    marginBottom: 16,
-    overflow: "hidden",
-    width: "100%",
-    maxWidth: 320,
-  },
-  plateStripe: {
-    width: 12,
-    alignSelf: "stretch",
-    backgroundColor: "#003399",
-  },
-  plateInput: {
-    flex: 1,
-    fontSize: 32,
-    fontWeight: "bold",
-    textAlign: "center",
-    letterSpacing: 4,
-    color: "#1a1a1a",
-    paddingVertical: 16,
-  },
-  plateStripeSpacer: {
-    width: 12,
-  },
-
-  // ── VIN input ────────────────────────────────────────────────────────────────
-  vinContainer: {
-    width: "100%",
-    maxWidth: 320,
-    marginBottom: 16,
-  },
-  vinInput: {
-    backgroundColor: C.surface,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border,
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-    letterSpacing: 2,
-    color: C.textPrimary,
-    paddingVertical: 18,
-    paddingHorizontal: 12,
-    fontFamily: Platform.OS === "ios" ? "Courier New" : "monospace",
+    backgroundColor: C.surface,
+    marginBottom: 20,
+    width: "100%",
+    maxWidth: 320,
+    overflow: "hidden",
   },
-  vinHint: {
-    fontSize: 11,
+  tab: {
+    flex: 1,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  tabActive: {
+    backgroundColor: C.accent,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: "600",
     color: C.textMuted,
-    textAlign: "center",
-    marginTop: 6,
+  },
+  tabTextActive: {
+    color: "#080a07",
   },
 
-  // ── Button ───────────────────────────────────────────────────────────────────
+  // ── Form ──────────────────────────────────────────────────────────────────────
+  form: {
+    width: "100%",
+    maxWidth: 320,
+    gap: 10,
+    marginBottom: 14,
+  },
+  input: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    color: C.textPrimary,
+  },
+
+  // ── CTA ───────────────────────────────────────────────────────────────────────
   button: {
-    backgroundColor: C.accentDark,
+    backgroundColor: C.accent,
     paddingVertical: 16,
     borderRadius: 10,
     width: "100%",
     maxWidth: 320,
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 16,
   },
   buttonText: {
-    color: "#fff",
+    color: "#080a07",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 0.3,
   },
 
-  // ── Mode switch ──────────────────────────────────────────────────────────────
-  switchLink: {
+  // ── Forgot ────────────────────────────────────────────────────────────────────
+  forgotText: {
     fontSize: 13,
     color: C.textMuted,
     textDecorationLine: "underline",

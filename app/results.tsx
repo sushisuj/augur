@@ -14,6 +14,19 @@ const SUPABASE_FUNCTION_URL =
 const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0d3lmcHBha3NhcmNsc2RsenRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDQ0MjIsImV4cCI6MjA5NzA4MDQyMn0.2tF9YmxFky0MT7Y6jn3bCn3GX21FgzPevB84uv8N42A";
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg:          "#080a07",
+  glass:       "rgba(255,255,255,0.05)" as const,
+  glassBorder: "rgba(255,255,255,0.10)" as const,
+  accent:      "#c2d635",
+  danger:      "#e05530",
+  warning:     "#e8a020",
+  textPrimary: "#ffffff",
+  textMuted:   "#888",
+  textDim:     "#555",
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Fault = {
@@ -82,6 +95,7 @@ type VehicleResult = {
   model_faults: Fault[];
   fault_count: number;
   mileage_warning: string | null;
+  population: { pass_rate: number; total_tests: number } | null;
   recalls: Recall[];
 };
 
@@ -97,23 +111,23 @@ function cleanText(text: string): string {
     .replace(/�/g, "'");
 }
 
+function verdictColor(verdict: string): string {
+  if (verdict === "Buy")     return C.accent;
+  if (verdict === "Consider") return C.warning;
+  return C.danger;
+}
+
 const SEVERITY_COLOR: Record<string, string> = {
-  High: "#e53e3e",
-  Medium: "#dd6b20",
-  Low: "#38a169",
+  High:   C.danger,
+  Medium: C.warning,
+  Low:    C.accent,
 };
 
 const PROVENANCE_COLOR: Record<string, string> = {
-  "DVSA Recall":  "#c53030",
-  "Honest John":  "#6b46c1",
-  "Augur Research": "#2b6cb0",
-  "DVSA MOT":     "#276749",
-};
-
-const VERDICT_COLOR: Record<string, string> = {
-  Buy: "#38a169",
-  Consider: "#dd6b20",
-  Avoid: "#e53e3e",
+  "DVSA Recall":    C.danger,
+  "Honest John":    "#8b5cf6",
+  "Augur Research": "#3b82f6",
+  "DVSA MOT":       C.accent,
 };
 
 function formatMileage(mileage: number | null, unit: string): string {
@@ -126,15 +140,15 @@ function formatMileage(mileage: number | null, unit: string): string {
 export default function ResultsScreen() {
   const { reg, vin } = useLocalSearchParams<{ reg: string; vin: string }>();
   const router = useRouter();
-  const [data, setData] = useState<VehicleResult | null>(null);
+  const [data, setData]       = useState<VehicleResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [motExpanded, setMotExpanded] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const [motExpanded, setMotExpanded]     = useState(false);
   const [knownExpanded, setKnownExpanded] = useState(false);
   const [recallsExpanded, setRecallsExpanded] = useState(false);
 
   useEffect(() => {
-    if (vin) fetchVehicle({ vin });
+    if (vin)      fetchVehicle({ vin });
     else if (reg) fetchVehicle({ reg });
   }, [reg, vin]);
 
@@ -147,8 +161,7 @@ export default function ResultsScreen() {
         headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
+      setData(await res.json());
     } catch (e: any) {
       setError(e.message ?? "Something went wrong");
     } finally {
@@ -159,8 +172,8 @@ export default function ResultsScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#1a1a1a" />
-        <Text style={styles.loadingText}>Checking {reg}...</Text>
+        <ActivityIndicator size="large" color={C.accent} />
+        <Text style={styles.loadingText}>Checking {reg ?? vin}...</Text>
       </View>
     );
   }
@@ -175,287 +188,276 @@ export default function ResultsScreen() {
 
   if (!data) return null;
 
-  const flags = data.flags ?? { clockingDetected: false, recurringFailures: [], persistentAdvisories: [], consistencyBonus: 0, cleanStreak: 0 };
+  const flags     = data.flags ?? { clockingDetected: false, recurringFailures: [], persistentAdvisories: [], consistencyBonus: 0, cleanStreak: 0 };
   const breakdown = data.breakdown;
-  const hasRecurringFailures = flags.recurringFailures.length > 0;
-  const hasPersistentAdvisories = flags.persistentAdvisories.length > 0;
+  const vColor    = verdictColor(data.verdict);
+  const passRate  = data.population?.pass_rate;
 
-  // Detect which MOT rows are part of a fraud pair so we can highlight them
+  // Detect clocking pairs for MOT history highlights
   const clockingRows = new Set<string>();
   if (data.mileage_warning) {
-    // Only compare miles-to-miles readings — km entries are almost always MOT
-    // tester data entry errors (miles entered as km) and create false positives.
-    // Also require a >1,000 mile drop to ignore same-day retests (2-mile differences).
     const sorted = [...data.mot_history]
-      .filter((t) => t.mileage !== null && (t.mileage_unit ?? "MI").toUpperCase() === "MI")
-      .map((t) => ({ date: t.date, miles: t.mileage! }))
+      .filter(t => t.mileage !== null && (t.mileage_unit ?? "MI").toUpperCase() === "MI")
+      .map(t => ({ date: t.date, miles: t.mileage! }))
       .sort((a, b) => a.date.localeCompare(b.date));
     for (let i = 1; i < sorted.length; i++) {
-      const drop = sorted[i - 1].miles - sorted[i].miles;
-      if (drop > 1000) {
+      if (sorted[i - 1].miles - sorted[i].miles > 1000) {
         clockingRows.add(sorted[i - 1].date);
         clockingRows.add(sorted[i].date);
       }
     }
   }
 
-  const PREVIEW_COUNT = 3;
+  const PREVIEW = 3;
+  const allFaults = [...(data.vehicle_issues ?? []), ...(data.model_faults ?? [])];
 
   return (
     <>
-    <Stack.Screen
-      options={{
-        headerLeft: () => (
-          <TouchableOpacity onPress={() => router.replace("/")} style={{ paddingHorizontal: 8 }}>
-            <Text style={{ fontSize: 17, color: "#007AFF" }}>‹ Back</Text>
-          </TouchableOpacity>
-        ),
-      }}
-    />
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Stack.Screen
+        options={{
+          headerLeft: () => (
+            <TouchableOpacity onPress={() => router.replace("/")} style={{ paddingHorizontal: 8 }}>
+              <Text style={{ fontSize: 17, color: C.textPrimary }}>‹ Back</Text>
+            </TouchableOpacity>
+          ),
+        }}
+      />
 
-      {/* Vehicle header */}
-      <View style={styles.vehicleCard}>
-        <Text style={styles.reg}>{data.vehicle.reg}</Text>
-        <Text style={styles.vehicleName}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+
+        {/* ── Vehicle header ── */}
+        <Text style={styles.vehicleHeader}>
           {data.vehicle.year} {data.vehicle.make} {data.vehicle.model}
+          <Text style={styles.vehicleReg}>  ·  {data.vehicle.reg}</Text>
         </Text>
-      </View>
 
-      {/* Augur Score */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Augur Score</Text>
-        <View style={styles.scoreRow}>
-          <Text style={styles.scoreNumber}>{data.score}</Text>
-          <Text style={styles.scoreOutOf}>/100</Text>
-          <View style={[styles.verdictBadge, { backgroundColor: VERDICT_COLOR[data.verdict] ?? "#999" }]}>
-            <Text style={styles.verdictText}>{data.verdict}</Text>
+        {/* ── Score card ── */}
+        <View style={[styles.glassCard, { borderColor: vColor, borderWidth: 1.5 }]}>
+          <View style={styles.scoreRow}>
+            <View style={[styles.scoreCircle, { borderColor: vColor }]}>
+              <Text style={[styles.scoreNumber, { color: vColor }]}>{data.score}</Text>
+              <Text style={[styles.scoreMax, { color: vColor }]}>/100</Text>
+            </View>
+            <View style={styles.scoreInfo}>
+              <Text style={[styles.verdictLabel, { color: vColor }]}>{data.verdict.toUpperCase()}</Text>
+              <Text style={styles.scoreSubtitle}>
+                {flags.recurringFailures.length > 0
+                  ? `${flags.recurringFailures.length} recurring failure${flags.recurringFailures.length > 1 ? "s" : ""}`
+                  : data.recalls?.length > 0
+                  ? `${data.recalls.length} active recall${data.recalls.length > 1 ? "s" : ""}`
+                  : "No major issues found"}
+              </Text>
+              {breakdown && (
+                <View style={styles.breakdownRow}>
+                  {breakdown.recurringFailureDeduction > 0 && (
+                    <Text style={styles.breakdownItem}>-{breakdown.recurringFailureDeduction} failures</Text>
+                  )}
+                  {breakdown.persistentAdvisoryDeduction > 0 && (
+                    <Text style={styles.breakdownItem}>-{breakdown.persistentAdvisoryDeduction} advisories</Text>
+                  )}
+                  {breakdown.modelReliabilityDeduction > 0 && (
+                    <Text style={styles.breakdownItem}>-{breakdown.modelReliabilityDeduction} reliability</Text>
+                  )}
+                  {breakdown.consistencyBonus > 0 && (
+                    <Text style={[styles.breakdownItem, { color: C.accent }]}>+{breakdown.consistencyBonus} clean streak</Text>
+                  )}
+                </View>
+              )}
+            </View>
           </View>
         </View>
 
-        {/* Score breakdown */}
-        {breakdown && (
-          <View style={styles.breakdownContainer}>
-            {breakdown.recurringFailureDeduction > 0 && (
-              <Text style={styles.breakdownLine}>
-                -{breakdown.recurringFailureDeduction} recurring failures
-              </Text>
-            )}
-            {breakdown.persistentAdvisoryDeduction > 0 && (
-              <Text style={styles.breakdownLine}>
-                -{breakdown.persistentAdvisoryDeduction} persistent advisories
-              </Text>
-            )}
-            {breakdown.modelReliabilityDeduction > 0 && (
-              <Text style={styles.breakdownLine}>
-                -{breakdown.modelReliabilityDeduction} model reliability
-              </Text>
-            )}
-            {breakdown.consistencyBonus > 0 && (
-              <Text style={[styles.breakdownLine, styles.breakdownBonus]}>
-                +{breakdown.consistencyBonus} clean MOT streak ({flags.cleanStreak} in a row)
-              </Text>
+        {/* ── Stat cards ── */}
+        <View style={styles.statRow}>
+          <View style={[styles.glassCard, styles.statCard]}>
+            <Text style={styles.statLabel}>MOT pass rate</Text>
+            <Text style={[styles.statValue, { color: C.accent }]}>
+              {passRate !== undefined && passRate !== null
+                ? `${Math.round(passRate * 100)}%`
+                : "N/A"}
+            </Text>
+          </View>
+          <View style={[styles.glassCard, styles.statCard]}>
+            <Text style={styles.statLabel}>Clean streak</Text>
+            <Text style={styles.statValue}>
+              {flags.cleanStreak}{" "}
+              <Text style={styles.statUnit}>tests</Text>
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Limited data warning ── */}
+        {(data.population?.total_tests ?? 0) < 50 && (
+          <View style={styles.limitedDataBanner}>
+            <Text style={styles.limitedDataTitle}>
+              {(data.population?.total_tests ?? 0) < 10 ? "Very limited data" : "Limited data"}
+            </Text>
+            <Text style={styles.limitedDataBody}>
+              {(data.population?.total_tests ?? 0) < 10
+                ? `Fewer than 10 MOT records exist for this model nationally. Pass rates and fault patterns are unreliable — treat this report as indicative only.`
+                : `Only ${data.population?.total_tests ?? "a handful of"} MOT records exist for this model nationally. Reliability figures may not reflect the broader picture.`}
+            </Text>
+          </View>
+        )}
+
+        {/* ── Gemini summary ── */}
+        <View style={styles.glassCard}>
+          <Text style={styles.cardLabel}>Buyer Summary</Text>
+          <Text style={styles.summaryText}>{cleanText(data.summary)}</Text>
+        </View>
+
+        {/* ── Expand buttons ── */}
+        <View style={styles.expandButtonRow}>
+          <TouchableOpacity
+            style={[styles.expandToggleBtn, motExpanded && styles.expandToggleBtnActive]}
+            onPress={() => setMotExpanded(!motExpanded)}
+          >
+            <Text style={[styles.expandToggleText, motExpanded && styles.expandToggleTextActive]}>
+              {motExpanded ? "Hide MOT History" : "View MOT History"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.expandToggleBtn, knownExpanded && styles.expandToggleBtnActive]}
+            onPress={() => setKnownExpanded(!knownExpanded)}
+          >
+            <Text style={[styles.expandToggleText, knownExpanded && styles.expandToggleTextActive]}>
+              {knownExpanded ? "Hide Known Issues" : "View Known Issues"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── MOT History (expandable) ── */}
+        {motExpanded && data.mot_history.length > 0 && (
+          <View style={styles.glassCard}>
+            <Text style={styles.cardLabel}>MOT History ({data.mot_history.length})</Text>
+            {data.mot_history.map((test, i) => {
+              const isFraud = clockingRows.has(test.date);
+              return (
+                <View key={i} style={[styles.motRow, isFraud && styles.motRowFraud]}>
+                  <View>
+                    <Text style={[styles.motDate, isFraud && { color: C.danger }]}>{test.date}</Text>
+                    <Text style={[styles.motMileage, isFraud && { color: C.danger }]}>
+                      {formatMileage(test.mileage, test.mileage_unit)}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <View style={[styles.motBadge, { backgroundColor: test.result === "PASSED" ? C.accent : C.danger }]}>
+                      <Text style={styles.motBadgeText}>{test.result === "PASSED" ? "Pass" : "Fail"}</Text>
+                    </View>
+                    {(test.failures > 0 || test.advisories > 0) && (
+                      <Text style={styles.motCounts}>
+                        {test.failures > 0 ? `${test.failures}F ` : ""}
+                        {test.advisories > 0 ? `${test.advisories}A` : ""}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Known Issues (expandable) ── */}
+        {knownExpanded && allFaults.length > 0 && (
+          <View style={styles.glassCard}>
+            <Text style={styles.cardLabel}>Known Issues ({allFaults.length})</Text>
+            {allFaults.map((fault, i) => (
+              <View key={i} style={styles.faultRow}>
+                <View style={styles.faultHeader}>
+                  <Text style={styles.faultCategory}>{fault.fault_category}</Text>
+                  <View style={styles.faultBadges}>
+                    {fault.provenance && (
+                      <View style={[styles.badge, { backgroundColor: PROVENANCE_COLOR[fault.provenance] ?? C.textDim }]}>
+                        <Text style={styles.badgeText}>{fault.provenance}</Text>
+                      </View>
+                    )}
+                    <View style={[styles.badge, { backgroundColor: SEVERITY_COLOR[fault.severity] ?? C.textDim }]}>
+                      <Text style={styles.badgeText}>{fault.severity}</Text>
+                    </View>
+                  </View>
+                </View>
+                <Text style={styles.faultDesc}>{cleanText(fault.fault_description)}</Text>
+                {fault.source && <Text style={styles.faultSource}>{fault.source}</Text>}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Odometer fraud ── */}
+        {data.mileage_warning && (
+          <View style={[styles.glassCard, styles.dangerCard]}>
+            <Text style={styles.dangerTitle}>Odometer Fraud Detected</Text>
+            <Text style={styles.dangerBody}>{data.mileage_warning}</Text>
+          </View>
+        )}
+
+        {/* ── Active recalls ── */}
+        {data.recalls?.length > 0 && (
+          <View style={[styles.glassCard, styles.dangerCard]}>
+            <Text style={styles.dangerTitle}>
+              Active Recall{data.recalls.length > 1 ? "s" : ""} ({data.recalls.length})
+            </Text>
+            <Text style={styles.dangerSubtitle}>
+              Ask the seller whether this recall was completed — any main dealer can verify it against the VIN for free.
+            </Text>
+            {(recallsExpanded ? data.recalls : data.recalls.slice(0, PREVIEW)).map((r, i) => (
+              <View key={i} style={styles.recallItem}>
+                <Text style={styles.recallConcern}>{r.concern}</Text>
+                <Text style={styles.recallDefect}>{r.defect}</Text>
+                <Text style={styles.recallMeta}>
+                  Recall {r.recall_number}
+                  {r.build_start ? `  ·  Builds ${r.build_start} – ${r.build_end ?? "onwards"}` : ""}
+                </Text>
+              </View>
+            ))}
+            {data.recalls.length > PREVIEW && (
+              <TouchableOpacity style={styles.expandBtn} onPress={() => setRecallsExpanded(!recallsExpanded)}>
+                <Text style={styles.expandBtnText}>{recallsExpanded ? "Show less" : `Show all ${data.recalls.length}`}</Text>
+              </TouchableOpacity>
             )}
           </View>
         )}
-      </View>
 
-      {/* Mileage / clocking warning */}
-      {data.mileage_warning && (
-        <View style={styles.dangerCard}>
-          <Text style={styles.dangerTitle}>Odometer Fraud Detected</Text>
-          <Text style={styles.dangerText}>{data.mileage_warning}</Text>
-        </View>
-      )}
-
-      {/* Active recalls */}
-      {data.recalls?.length > 0 && (
-        <View style={styles.recallCard}>
-          <Text style={styles.recallTitle}>
-            Active Recall{data.recalls.length > 1 ? "s" : ""} ({data.recalls.length})
-          </Text>
-          <Text style={styles.recallSubtitle}>
-            This vehicle falls within the build date range of a DVSA safety recall. Ask the seller whether this was completed — any main dealer can verify it against the VIN for free.
-          </Text>
-          {(recallsExpanded ? data.recalls : data.recalls.slice(0, PREVIEW_COUNT)).map((recall, i) => (
-            <View key={i} style={styles.recallItem}>
-              <Text style={styles.recallConcern}>{recall.concern}</Text>
-              <Text style={styles.recallDefect}>{recall.defect}</Text>
-              <Text style={styles.recallMeta}>
-                Recall {recall.recall_number}
-                {recall.build_start ? `  |  Affects builds ${recall.build_start} – ${recall.build_end ?? "onwards"}` : ""}
-              </Text>
-            </View>
-          ))}
-          {data.recalls.length > PREVIEW_COUNT && (
-            <TouchableOpacity
-              style={styles.expandButton}
-              onPress={() => setRecallsExpanded(!recallsExpanded)}
-            >
-              <Text style={styles.expandChevron}>{recallsExpanded ? "∧" : "∨"}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-
-      {/* Recurring failures */}
-      {hasRecurringFailures && (
-        <View style={styles.warningCard}>
-          <Text style={styles.warningTitle}>Recurring Failures</Text>
-          <Text style={styles.warningSubtitle}>
-            These faults appeared across multiple MOT tests — a sign of a chronic problem.
-          </Text>
-          {flags.recurringFailures.map((f, i) => (
-            <View key={i} style={styles.flagRow}>
-              <View style={styles.flagRowLeft}>
-                {f.dangerous && <View style={styles.dangerDot} />}
-                <Text style={styles.flagDescription}>{cleanText(f.description)}</Text>
-              </View>
-              <Text style={styles.flagMeta}>{f.occurrences}x</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Persistent advisories */}
-      {hasPersistentAdvisories && (
-        <View style={styles.cautionCard}>
-          <Text style={styles.cautionTitle}>Ignored Advisories</Text>
-          <Text style={styles.cautionSubtitle}>
-            These advisories appeared in more than one MOT without being fixed. The previous owner was aware and did nothing.
-          </Text>
-          {flags.persistentAdvisories.map((f, i) => (
-            <View key={i} style={styles.flagRow}>
-              <Text style={styles.flagDescription}>{cleanText(f.description)}</Text>
-              <Text style={styles.flagMeta}>{f.occurrences}x</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* AI Summary */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Buyer Summary</Text>
-        <Text style={styles.summary}>{cleanText(data.summary)}</Text>
-      </View>
-
-      {/* HPI recommendation banner */}
-      <View style={styles.hpiBanner}>
-        <Text style={styles.hpiTitle}>Run an HPI Check Before You Buy</Text>
-        <Text style={styles.hpiText}>
-          Augur checks MOT history and reliability data. It can't verify write-offs, outstanding finance, or whether the car has been stolen. An HPI check covers all three.
-        </Text>
-      </View>
-
-      {/* MOT History */}
-      {data.mot_history.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>MOT History ({data.mot_history.length})</Text>
-          {(motExpanded ? data.mot_history : data.mot_history.slice(0, PREVIEW_COUNT)).map((test, i) => {
-            const isFraud = clockingRows.has(test.date);
-            return (
-              <View
-                key={i}
-                style={[
-                  styles.motRow,
-                  isFraud && styles.motRowFraud,
-                ]}
-              >
-                <View style={styles.motLeft}>
-                  <Text style={[styles.motDate, isFraud && styles.motDateFraud]}>{test.date}</Text>
-                  <Text style={[styles.motMileage, isFraud && styles.motMileageFraud]}>
-                    {formatMileage(test.mileage, test.mileage_unit)}
-                  </Text>
+        {/* ── Recurring failures ── */}
+        {flags.recurringFailures.length > 0 && (
+          <View style={[styles.glassCard, styles.warningCard]}>
+            <Text style={styles.warningTitle}>Recurring Failures</Text>
+            <Text style={styles.warningSubtitle}>These faults appeared across multiple MOTs — a sign of a chronic problem.</Text>
+            {flags.recurringFailures.map((f, i) => (
+              <View key={i} style={styles.flagRow}>
+                <View style={{ flex: 1, flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+                  {f.dangerous && <View style={styles.dangerDot} />}
+                  <Text style={styles.flagDesc}>{cleanText(f.description)}</Text>
                 </View>
-                <View style={styles.motRight}>
-                  <View style={[
-                    styles.motResultBadge,
-                    { backgroundColor: test.result === "PASSED" ? "#38a169" : "#e53e3e" }
-                  ]}>
-                    <Text style={styles.motResultText}>
-                      {test.result === "PASSED" ? "Pass" : "Fail"}
-                    </Text>
-                  </View>
-                  {(test.failures > 0 || test.advisories > 0) && (
-                    <Text style={styles.motCounts}>
-                      {test.failures > 0 ? `${test.failures}F ` : ""}
-                      {test.advisories > 0 ? `${test.advisories}A` : ""}
-                    </Text>
-                  )}
-                </View>
+                <Text style={styles.flagCount}>{f.occurrences}x</Text>
               </View>
-            );
-          })}
-          {data.mot_history.length > PREVIEW_COUNT && (
-            <TouchableOpacity
-              style={styles.expandButton}
-              onPress={() => setMotExpanded(!motExpanded)}
-            >
-              <Text style={styles.expandChevron}>{motExpanded ? "∧" : "∨"}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+            ))}
+          </View>
+        )}
 
-      {/* Vehicle-specific issues */}
-      {data.vehicle_issues.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>This Vehicle's Issues</Text>
-          <Text style={styles.provenanceNote}>From this car's actual MOT test history</Text>
-          {data.vehicle_issues.map((fault, i) => (
-            <View key={i} style={styles.faultCard}>
-              <View style={styles.faultHeader}>
-                <Text style={styles.faultCategory}>{fault.fault_category}</Text>
-                <View style={[styles.severityBadge, { backgroundColor: SEVERITY_COLOR[fault.severity] ?? "#999" }]}>
-                  <Text style={styles.severityText}>{fault.severity}</Text>
-                </View>
+        {/* ── Persistent advisories ── */}
+        {flags.persistentAdvisories.length > 0 && (
+          <View style={[styles.glassCard, { borderLeftWidth: 3, borderLeftColor: C.warning }]}>
+            <Text style={[styles.warningTitle, { color: C.warning }]}>Ignored Advisories</Text>
+            <Text style={styles.warningSubtitle}>The previous owner was advised about these and did nothing.</Text>
+            {flags.persistentAdvisories.map((f, i) => (
+              <View key={i} style={styles.flagRow}>
+                <Text style={[styles.flagDesc, { flex: 1 }]}>{cleanText(f.description)}</Text>
+                <Text style={styles.flagCount}>{f.occurrences}x</Text>
               </View>
-              <Text style={styles.faultDescription}>{cleanText(fault.fault_description)}</Text>
-              <Text style={styles.faultSource}>{fault.source}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+            ))}
+          </View>
+        )}
 
-      {/* Model-wide faults */}
-      {data.model_faults.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Known Issues ({data.model_faults.length})
+        {/* ── HPI Banner ── */}
+        <View style={[styles.glassCard, { borderLeftWidth: 3, borderLeftColor: "#3b82f6" }]}>
+          <Text style={[styles.cardLabel, { color: "#3b82f6" }]}>Run an HPI Check Before You Buy</Text>
+          <Text style={styles.hpiBody}>
+            Augur checks MOT history and reliability. It can't verify write-offs, outstanding finance, or theft. An HPI check covers all three.
           </Text>
-          <Text style={styles.provenanceNote}>
-            Common faults and recalls for {data.vehicle.year} {data.vehicle.make} {data.vehicle.model}
-          </Text>
-          {(knownExpanded ? data.model_faults : data.model_faults.slice(0, PREVIEW_COUNT)).map((fault, i) => (
-            <View key={i} style={styles.faultCard}>
-              <View style={styles.faultHeader}>
-                <Text style={styles.faultCategory}>{fault.fault_category}</Text>
-                <View style={styles.faultBadgeRow}>
-                  {fault.provenance && (
-                    <View style={[styles.provenanceBadge, PROVENANCE_COLOR[fault.provenance] && { backgroundColor: PROVENANCE_COLOR[fault.provenance] }]}>
-                      <Text style={styles.provenanceText}>{fault.provenance}</Text>
-                    </View>
-                  )}
-                  <View style={[styles.severityBadge, { backgroundColor: SEVERITY_COLOR[fault.severity] ?? "#999" }]}>
-                    <Text style={styles.severityText}>{fault.severity}</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.faultDescription}>{cleanText(fault.fault_description)}</Text>
-            </View>
-          ))}
-          {data.model_faults.length > PREVIEW_COUNT && (
-            <TouchableOpacity
-              style={styles.expandButton}
-              onPress={() => setKnownExpanded(!knownExpanded)}
-            >
-              <Text style={styles.expandChevron}>{knownExpanded ? "∧" : "∨"}</Text>
-            </TouchableOpacity>
-          )}
         </View>
-      )}
 
-    </ScrollView>
+      </ScrollView>
     </>
   );
 }
@@ -463,205 +465,185 @@ export default function ResultsScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5" },
-  content: { padding: 16, paddingBottom: 40 },
-  centered: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  loadingText: { color: "#666", fontSize: 16 },
-  errorText: { color: "#e53e3e", fontSize: 16 },
+  container: { flex: 1, backgroundColor: C.bg },
+  content:   { padding: 16, paddingBottom: 48 },
+  centered:  { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, backgroundColor: C.bg },
+  loadingText: { color: C.textMuted, fontSize: 16 },
+  errorText:   { color: C.danger, fontSize: 16 },
 
-  vehicleCard: {
-    backgroundColor: "#1a1a1a",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
+  // ── Vehicle header ───────────────────────────────────────────────────────────
+  vehicleHeader: {
+    fontSize: 13,
+    color: C.textMuted,
+    marginBottom: 12,
   },
-  reg: { color: "#f7d94c", fontSize: 28, fontWeight: "bold", letterSpacing: 4 },
-  vehicleName: { color: "#fff", fontSize: 18, marginTop: 4 },
+  vehicleReg: { color: C.textDim },
 
-  section: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
+  // ── Glass card ───────────────────────────────────────────────────────────────
+  glassCard: {
+    backgroundColor: C.glass,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#666",
+  cardLabel: {
+    fontSize: 11,
+    color: C.textMuted,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
-    letterSpacing: 1,
     marginBottom: 10,
   },
-  provenanceNote: {
-    fontSize: 12,
-    color: "#999",
-    marginBottom: 12,
-    fontStyle: "italic",
+
+  // ── Score ────────────────────────────────────────────────────────────────────
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 20 },
+  scoreCircle: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    borderWidth: 3,
+    justifyContent: "center",
+    alignItems: "center",
+    flexShrink: 0,
   },
+  scoreNumber:   { fontSize: 34, fontWeight: "900", letterSpacing: -1, lineHeight: 36 },
+  scoreMax:      { fontSize: 11, fontWeight: "600", opacity: 0.6 },
+  scoreInfo:     { flex: 1 },
+  verdictLabel:  { fontSize: 28, fontWeight: "900", letterSpacing: 2, marginBottom: 4 },
+  scoreSubtitle: { fontSize: 13, color: C.textMuted, marginBottom: 6 },
+  breakdownRow:  { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  breakdownItem: { fontSize: 11, color: C.danger, backgroundColor: "rgba(224,85,48,0.12)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
 
-  // Score
-  scoreRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
-  scoreNumber: { fontSize: 48, fontWeight: "bold", color: "#1a1a1a" },
-  scoreOutOf: { fontSize: 20, color: "#999", marginRight: 12 },
-  verdictBadge: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  verdictText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  // ── Stat cards ───────────────────────────────────────────────────────────────
+  statRow:  { flexDirection: "row", gap: 12, marginBottom: 0 },
+  statCard: { flex: 1, marginBottom: 12 },
+  statLabel: { fontSize: 11, color: C.textMuted, marginBottom: 4 },
+  statValue: { fontSize: 24, fontWeight: "700", color: C.textPrimary },
+  statUnit:  { fontSize: 13, color: C.textMuted, fontWeight: "400" },
 
-  // Score breakdown
-  breakdownContainer: { marginTop: 12, gap: 3 },
-  breakdownLine: { fontSize: 12, color: "#e53e3e" },
-  breakdownBonus: { color: "#38a169" },
+  // ── Summary ──────────────────────────────────────────────────────────────────
+  summaryText: { fontSize: 15, color: C.textPrimary, lineHeight: 23 },
 
-  // Danger card (clocking)
-  dangerCard: {
-    backgroundColor: "#fff5f5",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#e53e3e",
+  // ── Danger card ──────────────────────────────────────────────────────────────
+  dangerCard:     { borderLeftWidth: 3, borderLeftColor: C.danger },
+  dangerTitle:    { fontSize: 13, fontWeight: "700", color: C.danger, marginBottom: 4 },
+  dangerBody:     { fontSize: 14, color: C.textPrimary, lineHeight: 21 },
+  dangerSubtitle: { fontSize: 12, color: "#ffffff", marginBottom: 10, lineHeight: 18 },
+
+  // ── Recalls ──────────────────────────────────────────────────────────────────
+  recallItem: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(224,85,48,0.2)",
+    paddingTop: 10,
+    marginTop: 10,
+    gap: 3,
   },
-  dangerTitle: { fontSize: 14, fontWeight: "700", color: "#c53030", marginBottom: 4 },
-  dangerText: { fontSize: 14, color: "#c53030" },
+  recallConcern: { fontSize: 13, fontWeight: "600", color: C.textPrimary },
+  recallDefect:  { fontSize: 13, color: "#ffffff", lineHeight: 18 },
+  recallMeta:    { fontSize: 11, color: "rgba(255,255,255,0.5)" },
 
-  // Warning card (recurring failures)
-  warningCard: {
-    backgroundColor: "#fffbeb",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#f59e0b",
-  },
-  warningTitle: { fontSize: 14, fontWeight: "700", color: "#92400e", marginBottom: 2 },
-  warningSubtitle: { fontSize: 12, color: "#b45309", marginBottom: 10 },
-
-  // Caution card (persistent advisories)
-  cautionCard: {
-    backgroundColor: "#fff7ed",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#dd6b20",
-  },
-  cautionTitle: { fontSize: 14, fontWeight: "700", color: "#c05621", marginBottom: 2 },
-  cautionSubtitle: { fontSize: 12, color: "#c05621", marginBottom: 10 },
-
-  // Flag rows (inside warning/caution cards)
+  // ── Warning card (recurring) ─────────────────────────────────────────────────
+  warningCard:    { borderLeftWidth: 3, borderLeftColor: C.danger },
+  warningTitle:   { fontSize: 13, fontWeight: "700", color: C.danger, marginBottom: 2 },
+  warningSubtitle:{ fontSize: 12, color: "#ffffff", marginBottom: 10 },
   flagRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     paddingVertical: 6,
     borderTopWidth: 1,
-    borderTopColor: "#fde68a",
+    borderTopColor: "rgba(255,255,255,0.06)",
     gap: 8,
   },
-  flagRowLeft: { flex: 1, flexDirection: "row", alignItems: "flex-start", gap: 6 },
-  dangerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#e53e3e", marginTop: 4 },
-  flagDescription: { flex: 1, fontSize: 13, color: "#444" },
-  flagMeta: { fontSize: 12, color: "#999", fontWeight: "600", minWidth: 24, textAlign: "right" },
+  flagDesc:  { fontSize: 13, color: C.textPrimary, lineHeight: 19 },
+  flagCount: { fontSize: 12, color: C.textMuted, fontWeight: "600", minWidth: 24, textAlign: "right" },
+  dangerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.danger, marginTop: 5 },
 
-  // HPI Banner
-  hpiBanner: {
-    backgroundColor: "#f0f4ff",
+  // ── HPI ──────────────────────────────────────────────────────────────────────
+  hpiBody: { fontSize: 13, color: "#ffffff", lineHeight: 20 },
+
+  // ── Limited data banner ───────────────────────────────────────────────────────
+  limitedDataBanner: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    borderLeftWidth: 3,
+    borderLeftColor: C.textMuted,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#4c6ef5",
+    padding: 14,
+    marginBottom: 12,
+    gap: 4,
   },
-  hpiTitle: { fontSize: 14, fontWeight: "700", color: "#3451c7", marginBottom: 4 },
-  hpiText: { fontSize: 13, color: "#3451c7", lineHeight: 19 },
+  limitedDataTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: C.textMuted,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  limitedDataBody: {
+    fontSize: 13,
+    color: C.textMuted,
+    lineHeight: 19,
+  },
 
-  summary: { fontSize: 16, color: "#1a1a1a", lineHeight: 24 },
+  // ── Expand toggle buttons ────────────────────────────────────────────────────
+  expandButtonRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
+  expandToggleBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
+    backgroundColor: C.glass,
+    alignItems: "center",
+  },
+  expandToggleBtnActive: {
+    borderColor: C.accent,
+    backgroundColor: "rgba(194,214,53,0.1)",
+  },
+  expandToggleText: { fontSize: 13, color: C.textMuted, fontWeight: "600" },
+  expandToggleTextActive: { color: C.accent },
 
-  // MOT History
+  // ── Expand inline button ─────────────────────────────────────────────────────
+  expandBtn: {
+    marginTop: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+  },
+  expandBtnText: { fontSize: 13, color: C.textMuted },
+
+  // ── MOT history ──────────────────────────────────────────────────────────────
   motRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "#f0f0f0",
+    borderTopColor: "rgba(255,255,255,0.06)",
   },
-  motLeft: { gap: 2 },
-  motDate: { fontSize: 14, fontWeight: "600", color: "#1a1a1a" },
-  motMileage: { fontSize: 12, color: "#999" },
-  motRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  motResultBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 4 },
-  motResultText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  motCounts: { fontSize: 12, color: "#999" },
+  motRowFraud: { backgroundColor: "rgba(224,85,48,0.08)", borderRadius: 6, paddingHorizontal: 6 },
+  motDate:     { fontSize: 14, fontWeight: "600", color: C.textPrimary },
+  motMileage:  { fontSize: 12, color: C.textMuted },
+  motBadge:    { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 4 },
+  motBadgeText:{ color: C.bg, fontSize: 12, fontWeight: "700" },
+  motCounts:   { fontSize: 12, color: C.textMuted },
 
-  // Faults
-  faultCard: {
+  // ── Fault rows ───────────────────────────────────────────────────────────────
+  faultRow: {
+    paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: "#f0f0f0",
-    paddingTop: 12,
-    marginTop: 12,
+    borderTopColor: "rgba(255,255,255,0.06)",
   },
-  faultHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  faultCategory: { fontSize: 13, fontWeight: "600", color: "#444" },
-  severityBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  severityText: { color: "#fff", fontSize: 11, fontWeight: "600" },
-  faultDescription: { fontSize: 14, color: "#555", lineHeight: 20 },
-  faultSource: { fontSize: 11, color: "#aaa", marginTop: 4 },
-  faultBadgeRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  provenanceBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: "#718096",
-  },
-  provenanceText: { color: "#fff", fontSize: 10, fontWeight: "600" },
-
-  // Fraud-highlighted MOT rows
-  motRowFraud: {
-    backgroundColor: "#fff5f5",
-    borderRadius: 6,
-    marginHorizontal: -4,
-    paddingHorizontal: 4,
-    borderTopColor: "#fed7d7",
-  },
-  motDateFraud: { color: "#c53030" },
-  motMileageFraud: { color: "#e53e3e", fontWeight: "600" },
-
-  // Recall card
-  recallCard: {
-    backgroundColor: "#fff5f5",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: "#c53030",
-  },
-  recallTitle: { fontSize: 14, fontWeight: "700", color: "#c53030", marginBottom: 4 },
-  recallSubtitle: { fontSize: 12, color: "#c53030", marginBottom: 12, lineHeight: 18 },
-  recallItem: {
-    borderTopWidth: 1,
-    borderTopColor: "#fed7d7",
-    paddingTop: 10,
-    marginTop: 10,
-    gap: 4,
-  },
-  recallConcern: { fontSize: 13, fontWeight: "600", color: "#742a2a" },
-  recallDefect: { fontSize: 13, color: "#c53030", lineHeight: 18 },
-  recallMeta: { fontSize: 11, color: "#e53e3e", marginTop: 2 },
-
-  // Expand/collapse button
-  expandButton: {
-    marginTop: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e8e8e8",
-    alignItems: "center",
-    backgroundColor: "#fafafa",
-  },
-  expandChevron: { fontSize: 16, color: "#999", lineHeight: 18 },
+  faultHeader:   { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  faultCategory: { fontSize: 12, color: C.textMuted, fontWeight: "600" },
+  faultBadges:   { flexDirection: "row", gap: 6 },
+  badge:         { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  badgeText:     { fontSize: 10, fontWeight: "700", color: C.bg },
+  faultDesc:     { fontSize: 14, color: C.textPrimary, lineHeight: 20 },
+  faultSource:   { fontSize: 11, color: C.textDim, marginTop: 4 },
 });
