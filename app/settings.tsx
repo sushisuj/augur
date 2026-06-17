@@ -8,8 +8,8 @@ import { useRouter } from "expo-router";
 
 const C = {
   bg:          "#080a07",
-  glass:       "rgba(255,255,255,0.05)" as const,
-  glassBorder: "rgba(255,255,255,0.10)" as const,
+  glass:       "rgba(255,255,255,0.10)" as const,
+  glassBorder: "rgba(255,255,255,0.20)" as const,
   danger:      "#e05530",
   textPrimary: "#ffffff",
   textMuted:   "#888",

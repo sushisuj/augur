@@ -10,17 +10,21 @@ const corsHeaders = {
  * Accepts a free-text symptom description and returns a ranked list of
  * probable fault causes with confidence scores for the given make/model/year.
  *
- * Two-step LLM pipeline:
+ * Three-step LLM pipeline:
+ *   0. Gemini classifies the symptom into a vehicle system (e.g. "Brakes", "Engine")
  *   1. Gemini extracts structured keywords from the symptom (NLP mapping layer)
  *   2. fault-search retrieves candidate faults from all three data sources
  *   3. Gemini scores each candidate for semantic relevance (0.0–1.0)
- *   4. Provenance weights are applied to produce final confidence %
+ *   4. Blended confidence: relevance (70%) + provenance bonus (30%)
  *
  * Confidence model:
- *   DVSA Recall    × 0.50  — manufacturer-acknowledged defect
+ *   confidence = (relevance × 0.70 + provenance_bonus × 0.30) × 100
+ *
+ *   Provenance bonuses:
+ *   DVSA Recall    → 1.00  — manufacturer-acknowledged defect
  *   Honest John /
- *   Augur Research × 0.35  — editorially verified known fault
- *   DVSA MOT       × 0.15  — frequency signal; guards against thin sample bias
+ *   Augur Research → 0.80  — editorially verified known fault
+ *   DVSA MOT       → 0.50  — frequency signal
  *
  * Query params:
  *   make    — vehicle make (required)
@@ -29,12 +33,18 @@ const corsHeaders = {
  *   symptom — free-text symptom description (required)
  */
 
-const PROVENANCE_WEIGHTS: Record<string, number> = {
-  "DVSA Recall":    0.50,
-  "Honest John":    0.35,
-  "Augur Research": 0.35,
-  "DVSA MOT":       0.15,
+const PROVENANCE_BONUS: Record<string, number> = {
+  "DVSA Recall":    1.00,
+  "Honest John":    0.80,
+  "Augur Research": 0.80,
+  "DVSA MOT":       0.50,
 };
+
+const VEHICLE_SYSTEMS = [
+  "Brakes", "Engine", "Steering", "Gearbox", "Clutch",
+  "Suspension", "Electrical", "Exhaust", "Cooling", "Fuel System",
+  "Tyres", "Air Conditioning", "Body", "Transmission", "Unknown",
+];
 
 async function geminiCall(apiKey: string, prompt: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -88,6 +98,22 @@ export default {
 
     const apiKey = Deno.env.get("GEMINI_API_KEY")!;
 
+    // ── Step 0: Classify symptom into a vehicle system ───────────────────────
+    // Runs in parallel with Step 1 — both are independent Gemini calls.
+    // The classification is returned to the client as context, and could be
+    // used in future to pre-filter fault-search results by category.
+
+    const classifyPrompt = `You are a vehicle diagnostic assistant.
+Classify the following symptom into exactly one vehicle system from this list:
+${VEHICLE_SYSTEMS.join(", ")}.
+
+Return ONLY a JSON object with two fields: "system" (string from the list) and "confidence" ("high", "medium", or "low").
+No explanation, no markdown, no code fences.
+
+Symptom: "${symptom}"
+
+Example output: {"system": "Brakes", "confidence": "high"}`;
+
     // ── Step 1: Extract keywords from symptom ────────────────────────────────
     // Ask Gemini to map free-text → structured fault search terms.
     // This is the NLP mapping layer — converting unstructured input to
@@ -101,7 +127,21 @@ Symptom: "${symptom}"
 
 Example output: ["brake", "disc", "calliper", "grinding"]`;
 
-    const keywordRaw = await geminiCall(apiKey, keywordPrompt);
+    // Fire classify + keyword extraction in parallel
+    const [classifyRaw, keywordRaw] = await Promise.all([
+      geminiCall(apiKey, classifyPrompt),
+      geminiCall(apiKey, keywordPrompt),
+    ]);
+
+    // Parse system classification
+    let vehicleSystem = "Unknown";
+    let systemConfidence = "low";
+    try {
+      const cleaned = classifyRaw.replace(/```[a-z]*\n?/gi, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (VEHICLE_SYSTEMS.includes(parsed.system)) vehicleSystem = parsed.system;
+      if (["high", "medium", "low"].includes(parsed.confidence)) systemConfidence = parsed.confidence;
+    } catch { /* leave defaults */ }
 
     let keywords: string[] = [];
     try {
@@ -181,19 +221,20 @@ Example output: ["brake", "disc", "calliper", "grinding"]`;
       .map((c: any, i: number) => `${i + 1}. ${c.description}`)
       .join("\n");
 
-    const scoringPrompt = `You are a vehicle fault diagnostic assistant.
+    const scoringPrompt = `You are a strict vehicle fault diagnostic assistant.
 A user noticed this symptom: "${symptom}"
 
-Rate how relevant each of the following known faults or recalls is to that symptom.
-A fault is relevant if it could plausibly produce or relate to the described symptom, even indirectly.
-Score each from 0.0 (completely unrelated) to 1.0 (directly explains the symptom).
-Be generous — a brake-related recall is still relevant to a braking symptom even if the defect description uses different words.
+Rate how directly each of the following faults explains that exact symptom.
+Be conservative. Only score above 0.5 if the fault could directly and plausibly produce the described symptom.
+Score 0.0 if the connection requires a significant logical leap or is coincidental (e.g. both involve noise but different systems entirely).
+Score 0.0 if the fault is from a completely unrelated vehicle system.
+A clutch recall is NOT relevant to a fogging windscreen. A brake recall is NOT relevant to an electrical symptom.
 Return ONLY a JSON array of numbers in the same order as the list. No explanation, no markdown, no code fences.
 
 Faults:
 ${candidateList}
 
-Example output for 3 faults: [0.85, 0.42, 0.10]`;
+Example output for 3 faults: [0.85, 0.10, 0.00]`;
 
     const scoringRaw = await geminiCall(apiKey, scoringPrompt);
 
@@ -206,29 +247,50 @@ Example output for 3 faults: [0.85, 0.42, 0.10]`;
       relevanceScores = [];
     }
 
-    // ── Step 4: Apply provenance weights → final confidence ──────────────────
+    // ── Step 4: Blended confidence = relevance (70%) + provenance bonus (30%) ─
+    // This ensures semantic match quality dominates over data source.
+    // A highly relevant MOT fault can outscore a loosely-matched recall.
 
     const diagnoses = dedupedCandidates
       .map((c: any, i: number) => {
-        const relevance   = typeof relevanceScores[i] === "number"
+        const relevance = typeof relevanceScores[i] === "number"
           ? Math.max(0, Math.min(1, relevanceScores[i]))
-          : 0.5; // fallback if scoring response is malformed
+          : 0.5;
 
-        const weight      = PROVENANCE_WEIGHTS[c.provenance] ?? 0.15;
-        const confidence  = Math.round(relevance * weight * 200); // ×200 so max (1.0 × 0.5) = 100
+        const provenanceBonus = PROVENANCE_BONUS[c.provenance] ?? 0.50;
+        const confidence = Math.round((relevance * 0.70 + provenanceBonus * 0.30) * 100);
 
         return {
-          fault:       c.description,
-          category:    c.category,
-          confidence,  // 0–100
-          provenance:  c.provenance,
-          source:      c.source,
-          relevance:   Math.round(relevance * 100), // raw semantic match % for debugging
+          fault:      c.description,
+          category:   c.category,
+          confidence, // 0–100
+          provenance: c.provenance,
+          source:     c.source,
+          relevance:  Math.round(relevance * 100), // raw semantic score for debugging
         };
       })
-      .filter((d: any) => d.confidence >= 5)
+      .filter((d: any) => d.relevance >= 25 && d.confidence >= 20)
       .sort((a: any, b: any) => b.confidence - a.confidence)
-      .slice(0, 5); // top 5 only
+      .slice(0, 5);
+
+    // ── Step 5 (fallback): General guidance if no verified results ──────────────
+    // Only runs when the DB returned nothing. Gemini provides general advice
+    // clearly labelled as AI-generated — no confidence score, no provenance.
+
+    let fallbackGuidance: string | null = null;
+
+    if (diagnoses.length === 0) {
+      const fallbackPrompt = `You are a cautious vehicle diagnostic assistant helping a used car buyer in the UK.
+A user is looking at a ${year} ${make} ${model} and noticed this symptom: "${symptom}"
+
+We have no verified fault records in our database for this symptom on this vehicle.
+Write 2–3 sentences of general guidance: what vehicle system this symptom likely relates to, what a mechanic would typically check, and a clear recommendation to have the car professionally inspected before buying.
+Do not invent specific fault names or part numbers. Do not give a diagnosis. Be honest that this is general guidance only.
+Write in plain English. No bullet points, no markdown.`;
+
+      fallbackGuidance = await geminiCall(apiKey, fallbackPrompt);
+      if (!fallbackGuidance?.trim()) fallbackGuidance = null;
+    }
 
     return Response.json({
       make,
@@ -236,7 +298,10 @@ Example output for 3 faults: [0.85, 0.42, 0.10]`;
       year,
       symptom,
       keywords,
+      vehicle_system:    vehicleSystem,
+      system_confidence: systemConfidence,
       diagnoses,
+      fallback_guidance: fallbackGuidance,
     }, { headers: corsHeaders });
   },
 };

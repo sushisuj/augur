@@ -15,9 +15,9 @@ Work top to bottom. Each section unblocks the next.
   - Should see 11 passed, 0 failed. Fix any failures before moving on.
 
 - [x] **EAS build — get app on a physical device**
-  - Expo Go doesn't support SDK 56
-  - `npm install -g eas-cli` → `eas build --platform ios --profile development`
-  - Test EN62LSK (expect 0/100, fraud highlighted) and a clean car on real hardware
+  - Expo Go now supports SDK 56 natively — no EAS dev build needed for JS changes
+  - Install Expo Go from Play Store / App Store, scan QR, get live reload
+  - EAS still required for production builds / TestFlight / native module additions
 
 ---
 
@@ -105,63 +105,40 @@ Depends on Section 3 being in place. The confidence scores come from indexed fau
   - Accepts: `make`, `model`, `year`, `symptom` (free text)
   - Disable JWT verification in Supabase dashboard after deploy
 
-- [ ] **Step 1 — LLM keyword extraction (Gemini call 1)**
-  - Send symptom to Gemini with a structured prompt: "Extract 3–5 search keywords from this symptom description. Return as a JSON array of strings only."
-  - Example: "whining noise when turning" → `["steering", "power steering", "pump", "noise"]`
-  - Parse JSON from Gemini response; fall back to splitting symptom on spaces if parsing fails
+- [x] **Step 1 — LLM keyword extraction (Gemini call 1)**
+  - Gemini extracts 3–5 keywords from the symptom and returns a JSON array
+  - Falls back to space-splitting if JSON parse fails
 
-- [ ] **Step 2 — fault-search lookup**
-  - Call `fault-search` internally via HTTP with `make`, `model`, `year`, `keywords` (comma-joined)
-  - Returns candidate faults across all three provenance sources: DVSA Recall, Augur Research/HJ, DVSA MOT
+- [x] **Step 2 — fault-search lookup**
+  - Calls `fault-search` internally with `make`, `model`, `year`, `keywords`
+  - Returns candidate faults across all three provenance sources
 
-- [ ] **Step 3 — semantic relevance scoring (Gemini call 2)**
-  - Send original symptom + list of candidate fault descriptions to Gemini
-  - Prompt: "For each fault, rate how likely it explains the symptom on a scale of 0.0 to 1.0. Return as a JSON array of numbers in the same order."
-  - This is the NLP mapping step: free-text → structured fault classification
+- [x] **Step 3 — semantic relevance scoring (Gemini call 2)**
+  - Sends original symptom + candidate fault descriptions to Gemini
+  - Returns relevance scores 0.0–1.0 per fault
 
-- [ ] **Step 4 — confidence calculation**
-  - Apply provenance weights to each fault's relevance score:
-    - DVSA Recall: × 0.50 (manufacturer-acknowledged defect)
-    - Honest John / Augur Research: × 0.35 (editorially verified)
-    - DVSA MOT: × 0.15 (frequency signal — guards against thin sample sizes)
-  - `confidence = relevance_score × provenance_weight × 100`
-  - Sort descending by confidence, return top 5
+- [x] **Step 4 — confidence calculation**
+  - Provenance weights: DVSA Recall × 0.50, HJ/Augur Research × 0.35, DVSA MOT × 0.15
+  - `confidence = relevance_score × provenance_weight × 100`, sorted descending, top 5 returned
 
-- [ ] **Response shape**
-  ```json
-  {
-    "make": "Ford", "model": "Focus", "year": 2014,
-    "symptom": "whining noise when turning",
-    "diagnoses": [
-      { "fault": "Power steering pump failure", "confidence": 74, "category": "Steering", "provenance": "Honest John", "source": "Honest John Carbycar" },
-      { "fault": "Steering rack wear", "confidence": 51, "category": "Steering", "provenance": "DVSA MOT", "source": "DVSA MOT Anonymised Test Data 2024" }
-    ]
-  }
-  ```
-
-- [ ] **Deploy and test**
-  - `supabase functions deploy vehicle-diagnose`
-  - Test via browser URL with a known car and real symptom (e.g. Ford Mondeo 2018, "grinding noise when braking")
-  - Verify confidence scores are plausible and provenance tags are correct
+- [x] **Deploy and test**
+  - Deployed and tested with Ford Mondeo 2018, "engine knocking in gear 2"
+  - Returned 3 DVSA Recall results at 90/90/80% — semantically valid matches
 
 ### 4b. App UI
 
-- [ ] **Add entry point to `results.tsx`**
-  - "Diagnose a symptom" button near the bottom of the results screen
-  - Passes `make`, `model`, `year`, `reg` as route params — no re-fetch needed
+- [x] **Add entry point to `results.tsx`**
+  - Glass card button above the HPI banner, passes `make`, `model`, `year` as route params
 
-- [ ] **Create `app/diagnose.tsx`**
-  - Receives `make`, `model`, `year` from params — display as context header ("Diagnosing: 2018 Ford Mondeo")
-  - Free-text input: "Describe what you noticed (e.g. grinding noise when braking)"
-  - Submit button triggers call to `vehicle-diagnose` Edge Function
-  - Loading state while waiting for response
+- [x] **Create `app/diagnose.tsx`**
+  - Pre-filled vehicle chip when navigating from results; manual Make/Model/Year fields when opening standalone
+  - Free-text symptom input (min 5 chars to enable submit)
+  - Calls `vehicle-diagnose` Edge Function via GET with query params
 
-- [ ] **Diagnosis results UI**
-  - Ranked cards: confidence % (large, coloured by threshold) + fault description + category
-  - Confidence colour: ≥70% red, ≥40% amber, <40% grey
-  - Provenance badge on each card (reuse `PROVENANCE_COLOR` from results.tsx)
-  - Example card: "74% likely — Power steering pump failure · Steering · Honest John"
-  - Caveat banner at top: "This is not a mechanic's diagnosis. Have the car inspected before buying."
+- [x] **Diagnosis results UI**
+  - Ranked cards with confidence circle (coloured ≥70% red, ≥40% amber, <40% grey)
+  - Provenance badge per card; caveat banner at top
+  - Empty state message if 0 results returned
 
 ---
 
@@ -177,19 +154,31 @@ These were already planned but depended on the data layer being solid first.
 
 ### 5b. Onboarding survey
 
-- [ ] **Create `app/onboarding.tsx`**
-  - "How will you mainly use this car?"
-  - Three large tappable tiles: Daily commuter / Family car / First car & budget buy
-  - Save to AsyncStorage under key `augur_persona`, navigate to home
-  - Skip link saves `null`
+- [x] **Create `app/onboarding.tsx`** — 4-step paginated survey
+  - Step 1 (usage, single-select): Daily commuter, Family car, Cheap car, City car, Workhorse
+  - Step 2 (body_type, multi-select grid): Hatchback, Saloon, Estate, SUV, Coupé, Convertible, Pickup & Van
+  - Step 3 (budget, single-select): Under £500, £500–£1,500, £1,500–£3,000, No set limit
+  - Step 4 (seller, single-select): Main dealer, Independent dealer, Private seller, Not sure yet
+  - Progress bar, Back button from step 2 onward, Skip survey link
+  - TODO: persist answers to AsyncStorage under `augur_persona`
 
 - [ ] **Gate on first launch**
   - In `_layout.tsx`, read `augur_persona` on mount
   - If key doesn't exist, redirect to `/onboarding`
 
-- [ ] **Settings screen to re-take survey**
-  - `app/settings.tsx` — same three tiles, current selection highlighted
-  - Overwrites `augur_persona` in AsyncStorage
+- [x] **Settings screen**
+  - `app/settings.tsx` — Profile (retake survey), Account (change password, sign out), About (version, data sources)
+
+### 5b-extra. Misc UI fixes (completed)
+
+- [x] **Limited data banner** — shown when `population.total_tests < 50`; "Very limited data" tier for < 10
+  - Discovered via Aixam Crossline test: niche vehicles get vague Gemini summaries with no fault data
+  - Augur degrades gracefully — shows raw numbers rather than hallucinating reliability claims
+
+- [x] **Reg plate normalisation** — `AB12CDE` → `AB12 CDE` before API call
+  - DVSA API returns HTTP 500 on unspaced plates; normaliser inserts space at position 4 for standard 7-char UK format
+
+- [x] **Dashboard scrollable** — switched from `View` to `ScrollView` with `flexGrow: 1` to fix layout on small screens
 
 ### 5c. Pass persona to Edge Function
 
@@ -247,9 +236,10 @@ The supervisor explicitly called this out as a standalone academic contribution.
   - `faults` and `recalls` tables: public read, authenticated write
   - Future survey responses: tied to user ID
 
-- [ ] **Auth screens in app**
-  - `app/login.tsx` and `app/register.tsx`
-  - Redirect unauthenticated users away from protected routes
+- [x] **Auth screens in app**
+  - `app/index.tsx` — sign in / create account tab switcher, both route to `/dashboard`
+  - `app/dashboard.tsx` — hub screen with cards for Check, Diagnose, Profile, Settings
+  - Sign out in settings routes back to `/`
 
 ---
 

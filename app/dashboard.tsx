@@ -4,14 +4,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
+  ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useFonts, BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
 
 const C = {
   bg:          "#080a07",
-  glass:       "rgba(255,255,255,0.05)" as const,
-  glassBorder: "rgba(255,255,255,0.10)" as const,
+  glass:       "rgba(255,255,255,0.10)" as const,
+  glassBorder: "rgba(255,255,255,0.20)" as const,
   accent:      "#c2d635",
   textPrimary: "#ffffff",
   textMuted:   "#888",
@@ -22,7 +23,11 @@ export default function DashboardScreen() {
   const [fontsLoaded] = useFonts({ BebasNeue_400Regular });
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+    >
 
       {/* ── Wordmark ── */}
       <View style={styles.header}>
@@ -90,16 +95,20 @@ export default function DashboardScreen() {
 
       </View>
 
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
     backgroundColor: C.bg,
+  },
+  container: {
+    flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 24,
+    paddingVertical: 48,
   },
 
   // ── Header ───────────────────────────────────────────────────────────────────

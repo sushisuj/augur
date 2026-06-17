@@ -20,8 +20,8 @@ const SUPABASE_ANON_KEY =
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
   bg:          "#080a07",
-  glass:       "rgba(255,255,255,0.05)" as const,
-  glassBorder: "rgba(255,255,255,0.10)" as const,
+  glass:       "rgba(255,255,255,0.10)" as const,
+  glassBorder: "rgba(255,255,255,0.20)" as const,
   surface:     "#131510",
   border:      "#1f2118",
   accent:      "#c2d635",
@@ -43,11 +43,14 @@ type Diagnosis = {
 };
 
 type DiagnoseResult = {
-  make:      string;
-  model:     string;
-  year:      number;
-  symptom:   string;
-  diagnoses: Diagnosis[];
+  make:               string;
+  model:              string;
+  year:               number;
+  symptom:            string;
+  vehicle_system:     string;
+  system_confidence:  "high" | "medium" | "low";
+  diagnoses:          Diagnosis[];
+  fallback_guidance:  string | null;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -204,6 +207,23 @@ export default function DiagnoseScreen() {
         {/* ── Results ── */}
         {result && (
           <View style={styles.results}>
+
+            {/* ── System classification badge ── */}
+            {result.vehicle_system && result.vehicle_system !== "Unknown" && (
+              <View style={styles.systemRow}>
+                <Text style={styles.systemLabel}>Classified as</Text>
+                <View style={[
+                  styles.systemBadge,
+                  result.system_confidence === "low" && styles.systemBadgeLow,
+                ]}>
+                  <Text style={styles.systemBadgeText}>{result.vehicle_system}</Text>
+                </View>
+                {result.system_confidence === "low" && (
+                  <Text style={styles.systemUncertain}>· uncertain</Text>
+                )}
+              </View>
+            )}
+
             <Text style={styles.resultsHeader}>
               {result.diagnoses.length > 0
                 ? `${result.diagnoses.length} possible cause${result.diagnoses.length > 1 ? "s" : ""} found`
@@ -211,9 +231,22 @@ export default function DiagnoseScreen() {
             </Text>
 
             {result.diagnoses.length === 0 && (
-              <Text style={styles.emptyText}>
-                Try rephrasing your symptom or check a more common vehicle to see if the database has relevant fault records.
-              </Text>
+              result.fallback_guidance ? (
+                <View style={styles.guidanceCard}>
+                  <View style={styles.guidanceHeader}>
+                    <Text style={styles.guidanceTag}>AI Guidance</Text>
+                    <Text style={styles.guidanceDisclaimer}>not from verified records</Text>
+                  </View>
+                  <Text style={styles.guidanceBody}>{result.fallback_guidance}</Text>
+                  <Text style={styles.guidanceFooter}>
+                    No verified fault records exist for this symptom on this vehicle. The above is general advice only — not a diagnosis.
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>
+                  No verified fault records found. Try rephrasing or check a more common vehicle.
+                </Text>
+              )
             )}
 
             {result.diagnoses.map((d, i) => {
@@ -366,6 +399,38 @@ const styles = StyleSheet.create({
 
   // ── Results ───────────────────────────────────────────────────────────────────
   results: { gap: 10 },
+
+  // ── System classification ─────────────────────────────────────────────────────
+  systemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 4,
+  },
+  systemLabel: {
+    fontSize: 12,
+    color: C.textMuted,
+  },
+  systemBadge: {
+    backgroundColor: C.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  systemBadgeLow: {
+    backgroundColor: "rgba(194,214,53,0.25)",
+  },
+  systemBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: C.bg,
+  },
+  systemUncertain: {
+    fontSize: 11,
+    color: C.textMuted,
+    fontStyle: "italic",
+  },
+
   resultsHeader: {
     fontSize: 13,
     color: C.textMuted,
@@ -376,6 +441,48 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: C.textMuted,
     lineHeight: 21,
+  },
+
+  // ── Fallback guidance card ────────────────────────────────────────────────────
+  guidanceCard: {
+    backgroundColor: "rgba(232,160,32,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(232,160,32,0.25)",
+    borderLeftWidth: 3,
+    borderLeftColor: C.warning,
+    borderRadius: 14,
+    padding: 16,
+    gap: 10,
+  },
+  guidanceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  guidanceTag: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: C.warning,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  guidanceDisclaimer: {
+    fontSize: 11,
+    color: C.textMuted,
+    fontStyle: "italic",
+  },
+  guidanceBody: {
+    fontSize: 14,
+    color: C.textPrimary,
+    lineHeight: 22,
+  },
+  guidanceFooter: {
+    fontSize: 12,
+    color: C.textMuted,
+    lineHeight: 18,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+    paddingTop: 10,
   },
 
   // ── Diagnosis card ────────────────────────────────────────────────────────────

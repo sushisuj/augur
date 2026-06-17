@@ -30,10 +30,24 @@ export default function HomeScreen() {
 
   const [fontsLoaded] = useFonts({ BebasNeue_400Regular });
 
+  const normaliseReg = (raw: string): string => {
+    const stripped = raw.trim().toUpperCase().replace(/\s/g, "");
+    // Standard UK format: AA00 AAA (7 chars) → insert space at position 4
+    if (stripped.length === 7) return `${stripped.slice(0, 4)} ${stripped.slice(4)}`;
+    // Older formats: A000 AAA or AA0 0000 etc. — just return as-is with the space
+    // already handled by the user, or let the API deal with it
+    return stripped;
+  };
+
   const handleSearch = () => {
-    const cleaned = input.trim().toUpperCase().replace(/\s/g, "");
-    if (!cleaned) return;
-    router.push(mode === "vin" ? `/results?vin=${cleaned}` : `/results?reg=${cleaned}`);
+    if (!input.trim()) return;
+    if (mode === "vin") {
+      const vin = input.trim().toUpperCase().replace(/\s/g, "");
+      router.push(`/results?vin=${vin}`);
+    } else {
+      const reg = normaliseReg(input);
+      router.push(`/results?reg=${encodeURIComponent(reg)}`);
+    }
   };
 
   const switchMode = (next: "reg" | "vin") => {

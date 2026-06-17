@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -17,8 +17,8 @@ const SUPABASE_ANON_KEY =
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
   bg:          "#080a07",
-  glass:       "rgba(255,255,255,0.05)" as const,
-  glassBorder: "rgba(255,255,255,0.10)" as const,
+  glass:       "rgba(255,255,255,0.10)" as const,
+  glassBorder: "rgba(255,255,255,0.20)" as const,
   accent:      "#c2d635",
   danger:      "#e05530",
   warning:     "#e8a020",
@@ -101,14 +101,15 @@ type VehicleResult = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function cleanText(text: string): string {
+function cleanText(text: string | null | undefined): string {
+  if (!text) return "";
   return text
     .replace(/\*\*(.*?)\*\*/g, "$1")
     .replace(/\*(.*?)\*/g, "$1")
-    .replace(/['']/g, "'")
+    .replace(/['''’]/g, "'")
     .replace(/[""]/g, '"')
     .replace(/–|—/g, "-")
-    .replace(/�/g, "'");
+    .replace(/[�◆■￾]/g, "'");  // replacement chars → apostrophe
 }
 
 function verdictColor(verdict: string): string {
@@ -137,6 +138,13 @@ function formatMileage(mileage: number | null, unit: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const LOADING_STEPS = [
+  "Fetching MOT history",
+  "Checking active recalls",
+  "Analysing fault patterns",
+  "Generating buyer summary",
+];
+
 export default function ResultsScreen() {
   const { reg, vin } = useLocalSearchParams<{ reg: string; vin: string }>();
   const router = useRouter();
@@ -146,11 +154,25 @@ export default function ResultsScreen() {
   const [motExpanded, setMotExpanded]     = useState(false);
   const [knownExpanded, setKnownExpanded] = useState(false);
   const [recallsExpanded, setRecallsExpanded] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (vin)      fetchVehicle({ vin });
     else if (reg) fetchVehicle({ reg });
   }, [reg, vin]);
+
+  useEffect(() => {
+    if (loading) {
+      setLoadingStep(0);
+      stepTimer.current = setInterval(() => {
+        setLoadingStep(s => Math.min(s + 1, LOADING_STEPS.length - 1));
+      }, 1600);
+    } else {
+      if (stepTimer.current) clearInterval(stepTimer.current);
+    }
+    return () => { if (stepTimer.current) clearInterval(stepTimer.current); };
+  }, [loading]);
 
   const fetchVehicle = async (params: { reg?: string; vin?: string }) => {
     setLoading(true);
@@ -172,8 +194,28 @@ export default function ResultsScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={C.accent} />
-        <Text style={styles.loadingText}>Checking {reg ?? vin}...</Text>
+        <Text style={styles.loadingReg}>{reg ?? vin}</Text>
+        <View style={styles.loadingSteps}>
+          {LOADING_STEPS.map((label, i) => {
+            const done    = i < loadingStep;
+            const current = i === loadingStep;
+            return (
+              <View key={i} style={styles.loadingStepRow}>
+                <View style={[styles.loadingDot, done && styles.loadingDotDone, current && styles.loadingDotActive]}>
+                  {done    && <Text style={styles.loadingCheck}>✓</Text>}
+                  {current && <ActivityIndicator size={10} color={C.bg} />}
+                </View>
+                <Text style={[
+                  styles.loadingStepText,
+                  done    && styles.loadingStepDone,
+                  current && styles.loadingStepActive,
+                ]}>
+                  {label}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
       </View>
     );
   }
@@ -402,8 +444,8 @@ export default function ResultsScreen() {
             </Text>
             {(recallsExpanded ? data.recalls : data.recalls.slice(0, PREVIEW)).map((r, i) => (
               <View key={i} style={styles.recallItem}>
-                <Text style={styles.recallConcern}>{r.concern}</Text>
-                <Text style={styles.recallDefect}>{r.defect}</Text>
+                <Text style={styles.recallConcern}>{cleanText(r.concern)}</Text>
+                <Text style={styles.recallDefect}>{cleanText(r.defect)}</Text>
                 <Text style={styles.recallMeta}>
                   Recall {r.recall_number}
                   {r.build_start ? `  ·  Builds ${r.build_start} – ${r.build_end ?? "onwards"}` : ""}
@@ -449,6 +491,33 @@ export default function ResultsScreen() {
           </View>
         )}
 
+        {/* ── Diagnose a symptom ── */}
+        <TouchableOpacity
+          style={styles.diagnoseBtn}
+          activeOpacity={0.8}
+          onPress={() =>
+            router.push({
+              pathname: "/diagnose",
+              params: {
+                make:  data.vehicle.make,
+                model: data.vehicle.model,
+                year:  String(data.vehicle.year),
+              },
+            })
+          }
+        >
+          <View style={styles.diagnoseBtnInner}>
+            <Text style={styles.diagnoseBtnIcon}>🔧</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.diagnoseBtnTitle}>Diagnose a symptom</Text>
+              <Text style={styles.diagnoseBtnDesc}>
+                Noticed something on a test drive? Match it against known faults for this {data.vehicle.make}.
+              </Text>
+            </View>
+            <Text style={styles.diagnoseBtnChevron}>›</Text>
+          </View>
+        </TouchableOpacity>
+
         {/* ── HPI Banner ── */}
         <View style={[styles.glassCard, { borderLeftWidth: 3, borderLeftColor: "#3b82f6" }]}>
           <Text style={[styles.cardLabel, { color: "#3b82f6" }]}>Run an HPI Check Before You Buy</Text>
@@ -467,9 +536,35 @@ export default function ResultsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   content:   { padding: 16, paddingBottom: 48 },
-  centered:  { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, backgroundColor: C.bg },
-  loadingText: { color: C.textMuted, fontSize: 16 },
-  errorText:   { color: C.danger, fontSize: 16 },
+  centered:  { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: C.bg, paddingHorizontal: 40 },
+  errorText: { color: C.danger, fontSize: 16 },
+
+  // ── Loading screen ───────────────────────────────────────────────────────────
+  loadingReg: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: C.textPrimary,
+    letterSpacing: 3,
+    marginBottom: 36,
+    textTransform: "uppercase",
+  },
+  loadingSteps: { gap: 20, width: "100%" },
+  loadingStepRow: { flexDirection: "row", alignItems: "center", gap: 14 },
+  loadingDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: C.textDim,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingDotDone:   { backgroundColor: C.accent, borderColor: C.accent },
+  loadingDotActive: { backgroundColor: C.accent, borderColor: C.accent },
+  loadingCheck:     { fontSize: 13, fontWeight: "900", color: C.bg },
+  loadingStepText:  { fontSize: 15, color: C.textDim },
+  loadingStepDone:  { color: C.textMuted },
+  loadingStepActive:{ color: C.textPrimary, fontWeight: "600" },
 
   // ── Vehicle header ───────────────────────────────────────────────────────────
   vehicleHeader: {
@@ -559,6 +654,26 @@ const styles = StyleSheet.create({
   flagDesc:  { fontSize: 13, color: C.textPrimary, lineHeight: 19 },
   flagCount: { fontSize: 12, color: C.textMuted, fontWeight: "600", minWidth: 24, textAlign: "right" },
   dangerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.danger, marginTop: 5 },
+
+  // ── Diagnose button ───────────────────────────────────────────────────────────
+  diagnoseBtn: {
+    backgroundColor: C.glass,
+    borderWidth: 1,
+    borderColor: C.glassBorder,
+    borderRadius: 16,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  diagnoseBtnInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 14,
+  },
+  diagnoseBtnIcon:    { fontSize: 26 },
+  diagnoseBtnTitle:   { fontSize: 15, fontWeight: "700", color: C.textPrimary, marginBottom: 3 },
+  diagnoseBtnDesc:    { fontSize: 13, color: C.textMuted, lineHeight: 18 },
+  diagnoseBtnChevron: { fontSize: 22, color: C.textMuted },
 
   // ── HPI ──────────────────────────────────────────────────────────────────────
   hpiBody: { fontSize: 13, color: "#ffffff", lineHeight: 20 },

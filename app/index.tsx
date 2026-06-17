@@ -14,8 +14,8 @@ import { useFonts, BebasNeue_400Regular } from "@expo-google-fonts/bebas-neue";
 
 const C = {
   bg:          "#080a07",
-  surface:     "rgba(255,255,255,0.05)",
-  border:      "rgba(255,255,255,0.10)",
+  surface:     "rgba(255,255,255,0.10)",
+  border:      "rgba(255,255,255,0.20)",
   accent:      "#c2d635",
   textPrimary: "#ffffff",
   textMuted:   "#888",
