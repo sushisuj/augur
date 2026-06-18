@@ -182,11 +182,13 @@ These were already planned but depended on the data layer being solid first.
   - Step 3 (budget, single-select): Under £500, £500–£1,500, £1,500–£3,000, No set limit
   - Step 4 (seller, single-select): Main dealer, Independent dealer, Private seller, Not sure yet
   - Progress bar, Back button from step 2 onward, Skip survey link
-  - TODO: persist answers to AsyncStorage under `augur_persona`
+  - Answers persisted to AsyncStorage under `augur_persona` on survey completion
+  - Routes to `/recommendations` on finish
 
-- [ ] **Gate on first launch**
+- [x] **Gate on first launch**
   - In `_layout.tsx`, read `augur_persona` on mount
   - If key doesn't exist, redirect to `/onboarding`
+  - `recommendations` screen registered in Stack
 
 - [x] **Settings screen**
   - `app/settings.tsx` — Profile (retake survey), Account (change password, sign out), About (version, data sources)

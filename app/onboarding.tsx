@@ -7,6 +7,7 @@ import {
   SafeAreaView,
 } from "react-native";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const C = {
   bg:          "#080a07",
@@ -46,6 +47,17 @@ const STEPS = [
       { key: "coupe",        label: "Coupé",           desc: "" },
       { key: "convertible",  label: "Convertible",     desc: "" },
       { key: "pickup",       label: "Pickup & Van",    desc: "" },
+    ],
+  },
+  {
+    key: "transmission",
+    question: "Manual or automatic?",
+    hint: "We'll flag it if the car you're checking doesn't match.",
+    multi: false,
+    options: [
+      { key: "manual",    label: "Manual",        desc: "Three-pedal, full control." },
+      { key: "automatic", label: "Automatic",     desc: "Easier in traffic, wider choice of EVs and hybrids." },
+      { key: "no_pref",   label: "No preference", desc: "Either works for me." },
     ],
   },
   {
@@ -109,10 +121,10 @@ export default function OnboardingScreen() {
     ? ((answers[current.key] as string[] | undefined)?.length ?? 0) > 0
     : !!answers[current.key];
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (isLast) {
-      // TODO: persist answers to AsyncStorage under "augur_persona"
-      router.replace("/dashboard");
+      await AsyncStorage.setItem("augur_persona", JSON.stringify(answers));
+      router.replace("/recommendations");
     } else {
       setStep(s => s + 1);
     }
