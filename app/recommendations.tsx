@@ -5,9 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 const C = {
   bg:          "#080a07",
@@ -26,79 +30,91 @@ type CarRecommendation = {
   make: string;
   model: string;
   yearRange: string;
-  pitch: string;
+  yearFrom: number;
+  yearTo: number;
   tags: string[];
-  bodyTypes: string[]; // which persona body_type keys this matches
+  bodyTypes: string[];
 };
+
+async function fetchModelSummary(car: CarRecommendation): Promise<{ summary: string; recordsUsed: number } | null> {
+  const cacheKey = `augur_model_summary_${car.id}`;
+  const cached = await AsyncStorage.getItem(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch { /* fall through */ }
+  }
+
+  const qs = new URLSearchParams({
+    make:      car.make,
+    model:     car.model,
+    year_from: String(car.yearFrom),
+    year_to:   String(car.yearTo),
+  });
+
+  const res = await fetch(
+    `${SUPABASE_URL}/functions/v1/model-summary?${qs}`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
+  );
+
+  if (!res.ok) {
+    console.log(`[model-summary] HTTP ${res.status} for ${car.make} ${car.model}:`, await res.text());
+    return null;
+  }
+  const data = await res.json();
+  console.log(`[model-summary] response for ${car.make} ${car.model}:`, JSON.stringify(data));
+  if (!data.summary) return null;
+
+  const result = { summary: data.summary, recordsUsed: data.records_used ?? 0 };
+  await AsyncStorage.setItem(cacheKey, JSON.stringify(result));
+  return result;
+}
 
 const ALL_PICKS: CarRecommendation[] = [
   {
     id: "golf-mk7",
-    make: "Volkswagen",
-    model: "Golf",
-    yearRange: "2013 – 2020",
-    pitch:
-      "The Mk7 is the benchmark used hatchback. Solid build, huge choice of engines, and enough supply that you can afford to be picky. The 1.4 TSI and 1.6 TDI are the sweet spots — avoid early 1.2 TSI units with high mileage.",
+    make: "Volkswagen", model: "Golf",
+    yearRange: "2013 – 2020", yearFrom: 2013, yearTo: 2020,
     tags: ["Hatchback", "Manual / Auto", "Wide availability", "Watch: DSG service history"],
     bodyTypes: ["hatchback"],
   },
   {
     id: "3series-f30",
-    make: "BMW",
-    model: "3 Series",
-    yearRange: "2012 – 2019",
-    pitch:
-      "The F30 is the go-to used saloon. Wide availability, strong parts support, and the 320d is genuinely solid when the service history checks out. Avoid anything with a timing chain rattle or signs of skipped oil services.",
+    make: "BMW", model: "3 Series",
+    yearRange: "2012 – 2019", yearFrom: 2012, yearTo: 2019,
     tags: ["Saloon", "Rear-wheel drive", "Strong parts support", "Watch: timing chain"],
     bodyTypes: ["saloon"],
   },
   {
     id: "octavia-estate",
-    make: "Skoda",
-    model: "Octavia Estate",
-    yearRange: "2013 – 2020",
-    pitch:
-      "The best value estate on the used market. Golf underpinnings with a boot that embarrasses cars twice the price. The 1.6 TDI is the workhorse pick — reliable, cheap to run, parts everywhere.",
+    make: "Skoda", model: "Octavia",
+    yearRange: "2013 – 2020", yearFrom: 2013, yearTo: 2020,
     tags: ["Estate", "Exceptional practicality", "VW Group platform", "Watch: DPF on short runs"],
     bodyTypes: ["estate"],
   },
   {
     id: "rav4-mk4",
-    make: "Toyota",
-    model: "RAV4",
-    yearRange: "2013 – 2018",
-    pitch:
-      "Hybrid option, bulletproof reliability reputation, and none of the PCP horror stories you get with German SUVs. Slightly dull to drive but that's not why you buy one.",
+    make: "Toyota", model: "RAV4",
+    yearRange: "2013 – 2018", yearFrom: 2013, yearTo: 2018,
     tags: ["SUV", "Hybrid available", "Exceptional reliability", "Watch: rust on older examples"],
     bodyTypes: ["suv"],
   },
   {
     id: "4series-f32",
-    make: "BMW",
-    model: "4 Series",
-    yearRange: "2013 – 2020",
-    pitch:
-      "Looks sharper than the 3 Series with the same mechanicals underneath. A coupé that genuinely drives well. Watch for timing chain issues on early 2.0-litre petrol units — same caveat as its saloon sibling.",
+    make: "BMW", model: "4 Series",
+    yearRange: "2013 – 2020", yearFrom: 2013, yearTo: 2020,
     tags: ["Coupé", "Rear-wheel drive", "Strong depreciation benefit", "Watch: timing chain"],
     bodyTypes: ["coupe"],
   },
   {
     id: "mx5-nd",
-    make: "Mazda",
-    model: "MX-5",
-    yearRange: "2015 – present",
-    pitch:
-      "Nothing else at this price comes close for driver involvement. The ND generation is reliable, well-built, and holds its value. Rust is the main concern on older examples — check the sills carefully.",
+    make: "Mazda", model: "MX-5",
+    yearRange: "2015 – 2024", yearFrom: 2015, yearTo: 2024,
     tags: ["Convertible", "Driver's car", "Reliable hood mechanism", "Watch: sill rust"],
     bodyTypes: ["convertible"],
   },
   {
     id: "ranger-mk4",
-    make: "Ford",
-    model: "Ranger",
-    yearRange: "2012 – 2022",
-    pitch:
-      "Dominates the UK pickup market for a reason. The double cab is practical enough for daily use, and parts are everywhere. The 2.2 TDCi is the pick — proven, tuneable, and easy to service.",
+    make: "Ford", model: "Ranger",
+    yearRange: "2012 – 2022", yearFrom: 2012, yearTo: 2022,
     tags: ["Pickup", "Double cab", "Strong towing capacity", "Watch: injector wear on high mileage"],
     bodyTypes: ["pickup"],
   },
@@ -155,10 +171,16 @@ function pickRecommendations(persona: Record<string, any> | null): {
 function CarCard({
   car,
   isTop,
+  summary,
+  recordsUsed,
+  timedOut,
   onCheck,
 }: {
   car: CarRecommendation;
   isTop: boolean;
+  summary: string | null | undefined; // undefined = loading, null = failed, string = done
+  recordsUsed: number;
+  timedOut: boolean;
   onCheck: () => void;
 }) {
   return (
@@ -177,7 +199,24 @@ function CarCard({
         <Text style={styles.cardYear}>{car.yearRange}</Text>
       </View>
 
-      <Text style={styles.cardPitch}>{car.pitch}</Text>
+      {/* AI summary — undefined = still loading, null = failed, string = done */}
+      {summary === undefined ? (
+        <View style={styles.summaryLoading}>
+          <ActivityIndicator size="small" color={C.textMuted} />
+          <Text style={styles.summaryLoadingText}>
+            {timedOut ? "Sorry, this is taking longer than usual." : "Analysing records…"}
+          </Text>
+        </View>
+      ) : summary ? (
+        <View style={styles.summaryBlock}>
+          <Text style={styles.summaryText}>{summary}</Text>
+          {recordsUsed > 0 && (
+            <Text style={styles.summaryAttribution}>
+              Based on {recordsUsed} verified record{recordsUsed !== 1 ? "s" : ""} · AI summary
+            </Text>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.tags}>
         {car.tags.map((t) => (
@@ -202,10 +241,15 @@ function CarCard({
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
+// undefined = not yet fetched (show spinner), null = fetch failed (show nothing), object = done
+type SummaryMap = Record<string, { summary: string; recordsUsed: number } | null | undefined>;
+
 export default function RecommendationsScreen() {
   const router = useRouter();
-  const [primary, setPrimary] = useState<CarRecommendation>(ALL_PICKS[0]);
-  const [others,  setOthers]  = useState<CarRecommendation[]>(ALL_PICKS.slice(1));
+  const [primary,   setPrimary]   = useState<CarRecommendation>(ALL_PICKS[0]);
+  const [others,    setOthers]    = useState<CarRecommendation[]>(ALL_PICKS.slice(1));
+  const [summaries, setSummaries] = useState<SummaryMap>({});
+  const [timedOut,  setTimedOut]  = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem("augur_persona").then((raw) => {
@@ -213,6 +257,22 @@ export default function RecommendationsScreen() {
       const { primary: p, others: o } = pickRecommendations(persona);
       setPrimary(p);
       setOthers(o);
+
+      // After 4s, flip timedOut so any still-spinning cards show a message instead
+      const timeout = setTimeout(() => setTimedOut(true), 4000);
+
+      // Fetch primary immediately, then others staggered to avoid Groq rate limits
+      fetchModelSummary(p).then((result) => {
+        setSummaries((prev) => ({ ...prev, [p.id]: result }));
+      });
+
+      o.forEach((car, i) => {
+        setTimeout(() => {
+          fetchModelSummary(car).then((result) => {
+            setSummaries((prev) => ({ ...prev, [car.id]: result }));
+          });
+        }, 1000 * (i + 1)); // 1s, 2s, 3s... between each
+      });
     });
   }, []);
 
@@ -228,12 +288,27 @@ export default function RecommendationsScreen() {
       </View>
 
       {/* ── Primary pick ── */}
-      <CarCard isTop car={primary} onCheck={() => router.push("/home")} />
+      <CarCard
+        isTop
+        car={primary}
+        summary={primary.id in summaries ? (summaries[primary.id]?.summary ?? null) : undefined}
+        recordsUsed={summaries[primary.id]?.recordsUsed ?? 0}
+        timedOut={timedOut}
+        onCheck={() => router.push("/home")}
+      />
 
       {/* ── Close choices ── */}
       <Text style={styles.sectionLabel}>Close choices</Text>
       {others.map((car) => (
-        <CarCard key={car.id} isTop={false} car={car} onCheck={() => router.push("/home")} />
+        <CarCard
+          key={car.id}
+          isTop={false}
+          car={car}
+          summary={car.id in summaries ? (summaries[car.id]?.summary ?? null) : undefined}
+          recordsUsed={summaries[car.id]?.recordsUsed ?? 0}
+          timedOut={timedOut}
+          onCheck={() => router.push("/home")}
+        />
       ))}
 
       {/* ── CTA ── */}
@@ -325,6 +400,35 @@ const styles = StyleSheet.create({
   cardModelTop: { fontSize: 24 },
   cardYear:     { fontSize: 13, color: C.textMuted, marginTop: 4 },
   cardPitch:    { fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 21 },
+
+  // Summary
+  summaryLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  summaryLoadingText: {
+    fontSize: 13,
+    color: C.textMuted,
+  },
+  summaryTimeout: {
+    fontSize: 13,
+    color: C.textMuted,
+    fontStyle: "italic",
+  },
+  summaryBlock: {
+    gap: 6,
+  },
+  summaryText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.80)",
+    lineHeight: 22,
+  },
+  summaryAttribution: {
+    fontSize: 11,
+    color: C.textMuted,
+    fontStyle: "italic",
+  },
 
   // Tags
   tags: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
