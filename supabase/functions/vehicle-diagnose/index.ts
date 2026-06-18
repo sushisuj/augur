@@ -48,24 +48,23 @@ const VEHICLE_SYSTEMS = [
 
 async function claudeCall(apiKey: string, prompt: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        "x-api-key":         apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type":      "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type":  "application/json",
       },
       body: JSON.stringify({
-        model:      "claude-haiku-4-5-20251001",
+        model:      "llama-3.1-8b-instant",
         max_tokens: 1024,
         messages:   [{ role: "user", content: prompt }],
       }),
     });
     const data = await res.json();
     if (res.ok) {
-      return data?.content?.[0]?.text ?? "";
+      return data?.choices?.[0]?.message?.content ?? "";
     }
-    if (res.status !== 529) break; // 529 = Anthropic overloaded
+    if (res.status !== 529) break;
     if (attempt < 3) await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
   return "";
@@ -98,7 +97,7 @@ export default {
       );
     }
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
+    const apiKey = Deno.env.get("GROQ_API_KEY")!;
 
     // ── Step 0: Classify symptom into a vehicle system ───────────────────────
     // Runs in parallel with Step 1 — both are independent Gemini calls.

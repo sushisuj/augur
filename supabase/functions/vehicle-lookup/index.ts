@@ -311,9 +311,8 @@ export default {
 
     // 4. Single Gemini call: fault clustering + buyer summary
     let summary = "No known faults found for this vehicle.";
-    const hasAnyFaults = vehicleIssues.length > 0 || modelFaults.length > 0;
 
-    if (hasAnyFaults || flags.recurringFailures.length > 0 || flags.persistentAdvisories.length > 0 || flags.clockingDetected) {
+    if (true) {
       const clockingNote = flags.clockingDetected
         ? `\nCRITICAL: Odometer fraud detected. The mileage on this vehicle's MOT records decreased between tests, which is physically impossible. The odometer has almost certainly been tampered with (clocked). The true mileage is unknown. This is the primary reason for the 0/100 score.\n`
         : "";
@@ -346,39 +345,39 @@ ${aggregatePassRate !== undefined
 Augur Score: ${score}/100 — ${verdict}
 Clean MOT streak: ${flags.cleanStreak} consecutive passes.
 
-Write a concise 2-3 sentence buyer summary in plain English. Follow these rules strictly:
+Write a concise 2-3 sentence buyer summary in plain English. Do NOT use bullet points, lists, dashes, or headers — write in flowing prose only. Follow these rules strictly:
 - If odometer fraud was detected, lead with that — the true mileage is unknown and the car must be avoided.
 - If active recalls are listed above, tell the buyer to ask the seller whether the recall was completed, and mention that any main dealer can verify this against the VIN for free.
 - If no recalls are listed, do not mention recalls at all.
-- Be direct and practical — the reader may have no car knowledge. No filler phrases.`;
+- Be direct and practical — the reader may have no car knowledge. No filler phrases.
+Output: plain prose only, 2-3 sentences, no formatting whatsoever.`;
 
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
-      let claudeText = "Summary unavailable.";
+      const apiKey = Deno.env.get("GROQ_API_KEY")!;
+      let summaryText = "Summary unavailable.";
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: {
-            "x-api-key":         apiKey,
-            "anthropic-version": "2023-06-01",
-            "content-type":      "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type":  "application/json",
           },
           body: JSON.stringify({
-            model:      "claude-haiku-4-5-20251001",
+            model:      "llama-3.1-8b-instant",
             max_tokens: 1024,
             messages:   [{ role: "user", content: prompt }],
           }),
         });
-        const claudeData = await claudeRes.json();
-        if (claudeRes.ok) {
-          claudeText = claudeData?.content?.[0]?.text ?? "Summary unavailable.";
+        const groqData = await groqRes.json();
+        if (groqRes.ok) {
+          summaryText = groqData?.choices?.[0]?.message?.content ?? "Summary unavailable.";
           break;
         }
-        if (claudeRes.status !== 529) break;
+        if (groqRes.status !== 429) break;
         if (attempt < 3) await new Promise((r) => setTimeout(r, 1000 * attempt));
       }
 
-      summary = claudeText;
+      summary = summaryText;
     }
 
     return Response.json({
