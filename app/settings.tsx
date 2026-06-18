@@ -42,6 +42,10 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>About</Text>
+        <TouchableOpacity style={styles.row} onPress={() => router.push("/transparency")}>
+          <Text style={styles.rowLabel}>How Augur works</Text>
+          <Text style={styles.rowChevron}>›</Text>
+        </TouchableOpacity>
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Version</Text>
           <Text style={styles.rowValue}>1.0.0</Text>

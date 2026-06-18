@@ -29,6 +29,8 @@ export default function RootLayout() {
       <Stack.Screen name="results"         options={{ title: "Vehicle Report", ...headerDark }} />
       <Stack.Screen name="diagnose"        options={{ title: "Diagnose",       ...headerDark }} />
       <Stack.Screen name="settings"        options={{ title: "Settings",       ...headerDark }} />
+      <Stack.Screen name="transparency"   options={{ title: "How Augur works",  ...headerDark }} />
+      <Stack.Screen name="model-report"   options={{ title: "Model Report",     ...headerDark }} />
     </Stack>
   );
 }

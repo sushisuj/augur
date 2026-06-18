@@ -24,8 +24,11 @@ const C = {
 };
 
 export default function HomeScreen() {
-  const [mode, setMode] = useState<"reg" | "vin">("reg");
+  const [mode, setMode] = useState<"reg" | "vin" | "make_model">("reg");
   const [input, setInput] = useState("");
+  const [make,  setMake]  = useState("");
+  const [model, setModel] = useState("");
+  const [year,  setYear]  = useState("");
   const router = useRouter();
 
   const [fontsLoaded] = useFonts({ BebasNeue_400Regular });
@@ -40,19 +43,29 @@ export default function HomeScreen() {
   };
 
   const handleSearch = () => {
-    if (!input.trim()) return;
-    if (mode === "vin") {
+    if (mode === "make_model") {
+      if (!make.trim() || !model.trim() || !year.trim()) return;
+      const qs = new URLSearchParams({ make: make.trim(), model: model.trim(), year: year.trim() });
+      router.push(`/model-report?${qs}`);
+    } else if (mode === "vin") {
+      if (!input.trim()) return;
       const vin = input.trim().toUpperCase().replace(/\s/g, "");
       router.push(`/results?vin=${vin}`);
     } else {
+      if (!input.trim()) return;
       const reg = normaliseReg(input);
       router.push(`/results?reg=${encodeURIComponent(reg)}`);
     }
   };
 
-  const switchMode = (next: "reg" | "vin") => {
+  const canSearch = mode === "make_model"
+    ? !!(make.trim() && model.trim() && year.trim())
+    : !!input.trim();
+
+  const switchMode = (next: "reg" | "vin" | "make_model") => {
     setMode(next);
     setInput("");
+    setMake(""); setModel(""); setYear("");
   };
 
   return (
@@ -90,7 +103,7 @@ export default function HomeScreen() {
             />
             <View style={styles.plateStripeSpacer} />
           </View>
-        ) : (
+        ) : mode === "vin" ? (
           <View style={styles.vinContainer}>
             <TextInput
               style={styles.vinInput}
@@ -105,19 +118,73 @@ export default function HomeScreen() {
             />
             <Text style={styles.vinHint}>17-character Vehicle Identification Number</Text>
           </View>
+        ) : (
+          <View style={styles.makeModelContainer}>
+            <TextInput
+              style={styles.makeModelInput}
+              value={make}
+              onChangeText={setMake}
+              placeholder="Make  (e.g. Ford)"
+              placeholderTextColor={C.textMuted}
+              autoCapitalize="words"
+              autoCorrect={false}
+              returnKeyType="next"
+            />
+            <TextInput
+              style={styles.makeModelInput}
+              value={model}
+              onChangeText={setModel}
+              placeholder="Model  (e.g. Focus)"
+              placeholderTextColor={C.textMuted}
+              autoCapitalize="words"
+              autoCorrect={false}
+              returnKeyType="next"
+            />
+            <TextInput
+              style={[styles.makeModelInput, styles.makeModelInputYear]}
+              value={year}
+              onChangeText={setYear}
+              placeholder="Year  (e.g. 2018)"
+              placeholderTextColor={C.textMuted}
+              keyboardType="number-pad"
+              maxLength={4}
+              returnKeyType="search"
+              onSubmitEditing={handleSearch}
+            />
+            <Text style={styles.vinHint}>Shows model-level faults, recalls and reliability data</Text>
+          </View>
         )}
 
         {/* ── CTA ── */}
-        <TouchableOpacity style={styles.button} onPress={handleSearch} activeOpacity={0.85}>
-          <Text style={styles.buttonText}>Check this car</Text>
-        </TouchableOpacity>
-
-        {/* ── Mode toggle ── */}
-        <TouchableOpacity onPress={() => switchMode(mode === "reg" ? "vin" : "reg")}>
-          <Text style={styles.switchLink}>
-            {mode === "reg" ? "Search by VIN instead" : "Search by Registration Plate instead"}
+        <TouchableOpacity
+          style={[styles.button, !canSearch && styles.buttonDisabled]}
+          onPress={handleSearch}
+          activeOpacity={0.85}
+          disabled={!canSearch}
+        >
+          <Text style={styles.buttonText}>
+            {mode === "make_model" ? "Check this model" : "Check this car"}
           </Text>
         </TouchableOpacity>
+
+        {/* ── Mode toggles ── */}
+        <View style={styles.switchLinks}>
+          {mode !== "reg" && (
+            <TouchableOpacity onPress={() => switchMode("reg")}>
+              <Text style={styles.switchLink}>Search by reg plate</Text>
+            </TouchableOpacity>
+          )}
+          {mode !== "vin" && (
+            <TouchableOpacity onPress={() => switchMode("vin")}>
+              <Text style={styles.switchLink}>Search by VIN</Text>
+            </TouchableOpacity>
+          )}
+          {mode !== "make_model" && (
+            <TouchableOpacity onPress={() => switchMode("make_model")}>
+              <Text style={styles.switchLink}>Don't have the reg?</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
       </View>
     </KeyboardAvoidingView>
@@ -215,6 +282,29 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  // ── Make / Model / Year ───────────────────────────────────────────────────────
+  makeModelContainer: {
+    width: "100%",
+    maxWidth: 320,
+    gap: 10,
+    marginBottom: 16,
+  },
+  makeModelInput: {
+    backgroundColor: C.surface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    fontSize: 16,
+    fontWeight: "600",
+    color: C.textPrimary,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  makeModelInputYear: {
+    // narrower feel for a 4-digit field — same height, just visual distinction
+    letterSpacing: 2,
+  },
+
   // ── Button ───────────────────────────────────────────────────────────────────
   button: {
     backgroundColor: C.accentDark,
@@ -225,6 +315,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
+  buttonDisabled: {
+    opacity: 0.4,
+  },
   buttonText: {
     color: "#080a07",
     fontSize: 16,
@@ -233,6 +326,10 @@ const styles = StyleSheet.create({
   },
 
   // ── Mode switch ──────────────────────────────────────────────────────────────
+  switchLinks: {
+    alignItems: "center",
+    gap: 10,
+  },
   switchLink: {
     fontSize: 13,
     color: C.textMuted,
