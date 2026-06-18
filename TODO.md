@@ -176,11 +176,12 @@ These were already planned but depended on the data layer being solid first.
 
 ### 5b. Onboarding survey
 
-- [x] **Create `app/onboarding.tsx`** — 4-step paginated survey
+- [x] **Create `app/onboarding.tsx`** — 5-step paginated survey
   - Step 1 (usage, single-select): Daily commuter, Family car, Cheap car, City car, Workhorse
   - Step 2 (body_type, multi-select grid): Hatchback, Saloon, Estate, SUV, Coupé, Convertible, Pickup & Van
-  - Step 3 (budget, single-select): Under £500, £500–£1,500, £1,500–£3,000, No set limit
-  - Step 4 (seller, single-select): Main dealer, Independent dealer, Private seller, Not sure yet
+  - Step 3 (transmission, single-select): Manual, Automatic, No preference ← added
+  - Step 4 (budget, single-select): Under £500, £500–£1,500, £1,500–£3,000, No set limit
+  - Step 5 (seller, single-select): Main dealer, Independent dealer, Private seller, Not sure yet
   - Progress bar, Back button from step 2 onward, Skip survey link
   - Answers persisted to AsyncStorage under `augur_persona` on survey completion
   - Routes to `/recommendations` on finish
@@ -191,7 +192,28 @@ These were already planned but depended on the data layer being solid first.
   - `recommendations` screen registered in Stack
 
 - [x] **Settings screen**
-  - `app/settings.tsx` — Profile (retake survey), Account (change password, sign out), About (version, data sources)
+  - `app/settings.tsx` — Profile (retake survey), Account (change password, sign out), About (version, data sources, How Augur works)
+
+- [x] **Transparency / methodology screen**
+  - `app/transparency.tsx` — scoring, fraud detection, diagnosis confidence, data sources, AI grounding, limitations
+  - Linked from Settings → About → "How Augur works"
+
+- [x] **Recommendations screen**
+  - `app/recommendations.tsx` — persona-matched car suggestions
+  - 10 cars per usage category across all 5 categories (50 cars total)
+  - Body-type proximity ranking within each pool
+  - "Augur's Choice" badge on primary pick; running cost badge; rationale text; DB-grounded AI summary
+  - Staggered fetch (1s intervals) to avoid Groq free-tier rate limits
+  - 4s timeout changes spinner text; three-state summary (loading/failed/done)
+
+- [x] **Model report screen (no reg required)**
+  - `app/model-report.tsx` — aggregate report by make/model/year
+  - "Don't have the reg?" entry added to home screen alongside reg/VIN modes
+  - MOT pass rate with colour-coded verdict (Great / Good / Average / Below average)
+  - Numeric DVSA RfR codes translated to plain English via Groq
+  - Known faults with provenance badges, active recalls
+  - AI summary grounded in DB records; clear "model-level data" caveat banner
+  - `model-summary` Edge Function extended: returns raw arrays, pass_rate, total_tests, verdict
 
 ### 5b-extra. Misc UI fixes (completed)
 
