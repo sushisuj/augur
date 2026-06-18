@@ -46,24 +46,26 @@ const VEHICLE_SYSTEMS = [
   "Tyres", "Air Conditioning", "Body", "Transmission", "Unknown",
 ];
 
-async function geminiCall(apiKey: string, prompt: string): Promise<string> {
+async function claudeCall(apiKey: string, prompt: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
-        }),
-      }
-    );
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key":         apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type":      "application/json",
+      },
+      body: JSON.stringify({
+        model:      "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        messages:   [{ role: "user", content: prompt }],
+      }),
+    });
     const data = await res.json();
     if (res.ok) {
-      return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      return data?.content?.[0]?.text ?? "";
     }
-    if (res.status !== 503) break;
+    if (res.status !== 529) break; // 529 = Anthropic overloaded
     if (attempt < 3) await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
   return "";
@@ -96,7 +98,7 @@ export default {
       );
     }
 
-    const apiKey = Deno.env.get("GEMINI_API_KEY")!;
+    const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
 
     // ── Step 0: Classify symptom into a vehicle system ───────────────────────
     // Runs in parallel with Step 1 — both are independent Gemini calls.
@@ -129,8 +131,8 @@ Example output: ["brake", "disc", "calliper", "grinding"]`;
 
     // Fire classify + keyword extraction in parallel
     const [classifyRaw, keywordRaw] = await Promise.all([
-      geminiCall(apiKey, classifyPrompt),
-      geminiCall(apiKey, keywordPrompt),
+      claudeCall(apiKey, classifyPrompt),
+      claudeCall(apiKey, keywordPrompt),
     ]);
 
     // Parse system classification
@@ -236,7 +238,7 @@ ${candidateList}
 
 Example output for 3 faults: [0.85, 0.10, 0.00]`;
 
-    const scoringRaw = await geminiCall(apiKey, scoringPrompt);
+    const scoringRaw = await claudeCall(apiKey, scoringPrompt);
 
     let relevanceScores: number[] = [];
     try {
@@ -288,7 +290,7 @@ Write 2–3 sentences of general guidance: what vehicle system this symptom like
 Do not invent specific fault names or part numbers. Do not give a diagnosis. Be honest that this is general guidance only.
 Write in plain English. No bullet points, no markdown.`;
 
-      fallbackGuidance = await geminiCall(apiKey, fallbackPrompt);
+      fallbackGuidance = await claudeCall(apiKey, fallbackPrompt);
       if (!fallbackGuidance?.trim()) fallbackGuidance = null;
     }
 

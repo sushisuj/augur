@@ -352,28 +352,33 @@ Write a concise 2-3 sentence buyer summary in plain English. Follow these rules 
 - If no recalls are listed, do not mention recalls at all.
 - Be direct and practical — the reader may have no car knowledge. No filler phrases.`;
 
-      const apiKey = Deno.env.get("GEMINI_API_KEY");
-      let geminiData: any = null;
+      const apiKey = Deno.env.get("ANTHROPIC_API_KEY")!;
+      let claudeText = "Summary unavailable.";
 
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
-            }),
-          }
-        );
-        geminiData = await geminiRes.json();
-        if (geminiRes.ok) break;
-        if (geminiRes.status !== 503) break;
+        const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key":         apiKey,
+            "anthropic-version": "2023-06-01",
+            "content-type":      "application/json",
+          },
+          body: JSON.stringify({
+            model:      "claude-haiku-4-5-20251001",
+            max_tokens: 1024,
+            messages:   [{ role: "user", content: prompt }],
+          }),
+        });
+        const claudeData = await claudeRes.json();
+        if (claudeRes.ok) {
+          claudeText = claudeData?.content?.[0]?.text ?? "Summary unavailable.";
+          break;
+        }
+        if (claudeRes.status !== 529) break;
         if (attempt < 3) await new Promise((r) => setTimeout(r, 1000 * attempt));
       }
 
-      summary = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Summary unavailable.";
+      summary = claudeText;
     }
 
     return Response.json({
