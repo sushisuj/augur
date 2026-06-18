@@ -134,7 +134,14 @@ ${faultSection}
 
 ${recallSection}
 
-Using only the data above (do not invent faults or issues not mentioned), write 2–3 sentences of practical buying advice for someone considering this car. Mention the most common issue to check, and if the data supports it, suggest the best year or variant to look for. Write in plain English. No bullet points, no markdown, no headers. If the data is sparse, say so honestly rather than filling in with generic advice.`;
+Using only the data above, write 2–3 sentences of practical buying advice for someone considering this car.
+Rules:
+- Do NOT reference fault codes, internal IDs, or technical identifiers — describe the fault in plain English instead (e.g. "lighting failures" not "code 31194")
+- Mention the most common issue to watch for
+- If the data supports it, suggest the best year or variant to prioritise
+- Be direct and specific — no filler phrases like "it's essential to", "it's important to note", or "when considering"
+- Plain prose only. No bullet points, no markdown, no headers
+- If the data is too sparse to say anything meaningful, say so in one sentence rather than padding with generic advice`;
 
     const apiKey = Deno.env.get("GROQ_API_KEY")!;
     const summary = await groqCall(apiKey, prompt);

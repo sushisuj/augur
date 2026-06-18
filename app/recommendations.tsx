@@ -10,8 +10,10 @@ import {
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0d3lmcHBha3NhcmNsc2RsenRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MDQ0MjIsImV4cCI6MjA5NzA4MDQyMn0.2tF9YmxFky0MT7Y6jn3bCn3GX21FgzPevB84uv8N42A";
+const MODEL_SUMMARY_URL =
+  "https://xtwyfppaksarclsdlzti.supabase.co/functions/v1/model-summary";
 
 const C = {
   bg:          "#080a07",
@@ -38,34 +40,39 @@ type CarRecommendation = {
 
 async function fetchModelSummary(car: CarRecommendation): Promise<{ summary: string; recordsUsed: number } | null> {
   const cacheKey = `augur_model_summary_${car.id}`;
-  const cached = await AsyncStorage.getItem(cacheKey);
-  if (cached) {
-    try { return JSON.parse(cached); } catch { /* fall through */ }
-  }
+  try {
+    const cached = await AsyncStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch { /* ignore cache errors */ }
 
-  const qs = new URLSearchParams({
-    make:      car.make,
-    model:     car.model,
-    year_from: String(car.yearFrom),
-    year_to:   String(car.yearTo),
-  });
+  try {
+    const qs = new URLSearchParams({
+      make:      car.make,
+      model:     car.model,
+      year_from: String(car.yearFrom),
+      year_to:   String(car.yearTo),
+    });
 
-  const res = await fetch(
-    `${SUPABASE_URL}/functions/v1/model-summary?${qs}`,
-    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
-  );
+    const res = await fetch(
+      `${MODEL_SUMMARY_URL}?${qs}`,
+      { headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
+    );
 
-  if (!res.ok) {
-    console.log(`[model-summary] HTTP ${res.status} for ${car.make} ${car.model}:`, await res.text());
+    const text = await res.text();
+    console.log(`[model-summary] ${car.make} ${car.model} → HTTP ${res.status}:`, text);
+
+    if (!res.ok) return null;
+
+    const data = JSON.parse(text);
+    if (!data.summary) return null;
+
+    const result = { summary: data.summary, recordsUsed: data.records_used ?? 0 };
+    await AsyncStorage.setItem(cacheKey, JSON.stringify(result));
+    return result;
+  } catch (err) {
+    console.log(`[model-summary] fetch error for ${car.make} ${car.model}:`, err);
     return null;
   }
-  const data = await res.json();
-  console.log(`[model-summary] response for ${car.make} ${car.model}:`, JSON.stringify(data));
-  if (!data.summary) return null;
-
-  const result = { summary: data.summary, recordsUsed: data.records_used ?? 0 };
-  await AsyncStorage.setItem(cacheKey, JSON.stringify(result));
-  return result;
 }
 
 const ALL_PICKS: CarRecommendation[] = [
