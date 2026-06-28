@@ -211,6 +211,13 @@ export default {
       return Response.json({ error: "Provide either reg or vin" }, { status: 400, headers: corsHeaders });
     }
 
+    // ── Persona (optional) ────────────────────────────────────────────────────
+    let persona: Record<string, any> | null = null;
+    try {
+      const raw = url.searchParams.get("persona");
+      if (raw && raw !== "none") persona = JSON.parse(raw);
+    } catch { /* ignore malformed persona */ }
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!
@@ -325,8 +332,48 @@ export default {
         ? `\nPersistent advisories (owner has not addressed these):\n${flags.persistentAdvisories.map((f) => `- "${f.description}" (${f.occurrences}x)`).join("\n")}`
         : "";
 
+      // ── Build persona tone block ────────────────────────────────────────────
+      let personaBlock = "";
+      if (persona) {
+        const usageTone: Record<string, string> = {
+          daily_commuter: "This buyer uses their car daily for commuting. Reliability and running costs are their top priority — flag anything suggesting frequent repairs or high maintenance bills. Mention fuel economy implications if relevant.",
+          family_car:     "This buyer needs a family car. Safety is the top priority — lead with any safety-critical failures or recalls. Mention anything that affects passenger protection, child seat anchors, or NCAP implications if relevant.",
+          cheap_car:      "This buyer wants to keep costs as low as possible. Frame every fault in terms of likely repair cost. Flag anything expensive to fix first. Keep language simple — assume no mechanical knowledge.",
+          city_car:       "This buyer primarily drives in the city. Focus on stop-start reliability, low-speed drivetrain issues, and anything that would affect urban usability or insurance cost.",
+          workhorse:      "This buyer needs a working vehicle for towing or carrying loads. Focus on drivetrain and structural reliability under heavy use. Flag any issues that would affect towing capacity or payload.",
+        };
+
+        const budgetNote: Record<string, string> = {
+          under_500:  "Their annual repair budget is under £500 — flag anything likely to exceed this in a single repair.",
+          "500_1500": "Their annual repair budget is £500–£1,500.",
+          "1500_3000":"Their annual repair budget is £1,500–£3,000.",
+          no_limit:   "Running costs are not a primary concern for this buyer.",
+        };
+
+        const sellerNote: Record<string, string> = {
+          private:    "This is a private sale — there are no consumer rights protections if faults emerge after purchase. Be more cautious in tone and flag anything that should be independently inspected before committing.",
+          indie_dealer:"Buying from an independent dealer. Standard consumer rights apply but standards vary.",
+          main_dealer: "Buying from a main dealer — manufacturer warranty likely still applies or a dealer warranty is offered. Less need to flag minor issues.",
+          unsure:      "",
+        };
+
+        const usage   = persona.usage   as string | undefined;
+        const budget  = persona.budget  as string | undefined;
+        const seller  = persona.seller  as string | undefined;
+
+        const parts = [
+          usage  && usageTone[usage]   ? `Buyer profile: ${usageTone[usage]}`   : "",
+          budget && budgetNote[budget] ? budgetNote[budget]                      : "",
+          seller && sellerNote[seller] ? sellerNote[seller]                      : "",
+        ].filter(Boolean);
+
+        if (parts.length) {
+          personaBlock = `\nBUYER CONTEXT (adjust your summary tone accordingly):\n${parts.join("\n")}\n`;
+        }
+      }
+
       const prompt = `You are a used car buying assistant. A buyer is considering a ${vehicle.year} ${vehicle.make} ${vehicle.model} (reg: ${vehicle.reg}).
-${clockingNote}
+${personaBlock}${clockingNote}
 Issues found on THIS SPECIFIC VEHICLE from its MOT history:
 ${vehicleIssues.length > 0 ? vehicleIssues.map((f) => `- ${f.fault_description} (${f.source})`).join("\n") : "None recorded."}
 ${recurringNote}${persistentNote}

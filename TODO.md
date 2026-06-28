@@ -55,19 +55,6 @@ This is the foundation everything else depends on. The supervisor's concern was 
   - Surface relevant recalls in the results — these are safety-critical, show them prominently
   - Provenance tag: `"DVSA Recall"`
 
-### 2c. Honest John Data Curation (Supplementary Source)
-
-- [ ] **Manually curate known faults from Honest John Carbycar**
-  - Focus on the initial set of models Augur covers (popular UK used cars)
-  - Covers faults that don't appear in MOT records: electrical issues, premature wear, recurring mechanical problems
-  - Enter into existing `faults` table with `source: "Honest John"` and `provenance: "curated"`
-
-- [ ] **Attribution**
-  - Every Honest John record must carry full attribution in the DB
-  - UI must display "Source: Honest John" on any claim drawn from this data
-
----
-
 ## 3. Custom Internal API with Keyword Indexing
 
 This is a core technical contribution, not just a backend task. The AI layer currently generates summaries from a flat prompt. This replaces that with a queryable, indexed data layer the AI retrieves from at runtime — grounding outputs in verifiable records rather than training knowledge.

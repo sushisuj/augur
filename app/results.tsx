@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const SUPABASE_FUNCTION_URL =
   "https://xtwyfppaksarclsdlzti.supabase.co/functions/v1/vehicle-lookup";
@@ -158,8 +159,11 @@ export default function ResultsScreen() {
   const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (vin)      fetchVehicle({ vin });
-    else if (reg) fetchVehicle({ reg });
+    AsyncStorage.getItem("augur_persona").then((raw) => {
+      const persona = raw ?? "none";
+      if (vin)      fetchVehicle({ vin, persona });
+      else if (reg) fetchVehicle({ reg, persona });
+    });
   }, [reg, vin]);
 
   useEffect(() => {
@@ -174,10 +178,13 @@ export default function ResultsScreen() {
     return () => { if (stepTimer.current) clearInterval(stepTimer.current); };
   }, [loading]);
 
-  const fetchVehicle = async (params: { reg?: string; vin?: string }) => {
+  const fetchVehicle = async (params: { reg?: string; vin?: string; persona?: string }) => {
     setLoading(true);
     setError(null);
-    const qs = params.vin ? `vin=${params.vin}` : `reg=${params.reg}`;
+    const qs = new URLSearchParams();
+    if (params.vin) qs.set("vin", params.vin);
+    else if (params.reg) qs.set("reg", params.reg);
+    if (params.persona && params.persona !== "none") qs.set("persona", params.persona);
     try {
       const res = await fetch(`${SUPABASE_FUNCTION_URL}?${qs}`, {
         headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
